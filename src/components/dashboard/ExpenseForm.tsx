@@ -92,6 +92,7 @@ export default function ExpenseForm({ categories, onSuccess }: ExpenseFormProps)
       <div>
         <label className="block text-sm font-semibold text-gray-700 mb-2">Log a new expense</label>
         
+        {/* Dropzone UI */}
         {!imageBase64 ? (
           <div 
             className={`mb-4 border-2 border-dashed rounded-lg p-6 text-center transition-colors ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'}`}
