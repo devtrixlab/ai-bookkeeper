@@ -6,9 +6,11 @@ import { Loader2 } from 'lucide-react';
 import DashboardHeader from '@/components/dashboard/DashboardHeader';
 import ExpenseForm from '@/components/dashboard/ExpenseForm';
 import PendingTable from '@/components/dashboard/PendingTable';
+import VerifiedLedger from '@/components/dashboard/VerifiedLedger';
 
 export default function Dashboard() {
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [pendingTransactions, setPendingTransactions] = useState<any[]>([]);
+  const [verifiedTransactions, setVerifiedTransactions] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -20,17 +22,21 @@ export default function Dashboard() {
     setIsLoading(true);
     const { data: cats } = await supabase.from('categories').select('*');
     if (cats) setCategories(cats);
-    await fetchPendingTransactions();
+    await fetchTransactions();
     setIsLoading(false);
   }
 
-  async function fetchPendingTransactions() {
+  async function fetchTransactions() {
     const { data } = await supabase
       .from('transactions')
       .select('*, categories(name)')
-      .eq('is_user_verified', false)
       .order('created_at', { ascending: false });
-    if (data) setTransactions(data);
+    
+    if (data) {
+      // Split the single database call into our two distinct UI states
+      setPendingTransactions(data.filter(t => !t.is_user_verified));
+      setVerifiedTransactions(data.filter(t => t.is_user_verified));
+    }
   }
 
   if (isLoading) {
@@ -44,13 +50,17 @@ export default function Dashboard() {
         
         <ExpenseForm 
           categories={categories} 
-          onSuccess={fetchPendingTransactions} 
+          onSuccess={fetchTransactions} 
         />
         
         <PendingTable 
-          transactions={transactions} 
+          transactions={pendingTransactions} 
           categories={categories} 
-          onDataChanged={fetchPendingTransactions} 
+          onDataChanged={fetchTransactions} 
+        />
+
+        <VerifiedLedger 
+          transactions={verifiedTransactions} 
         />
       </div>
     </div>
