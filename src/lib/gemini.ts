@@ -1,9 +1,7 @@
-import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import { GoogleGenerativeAI, SchemaType, type ResponseSchema } from '@google/generative-ai';
 
-// We initialize the client securely using the server-side environment variable
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-// We export this strict schema so our API route can force Gemini to return JSON
 export const expenseSchema = {
   type: SchemaType.OBJECT,
   properties: {
@@ -14,16 +12,15 @@ export const expenseSchema = {
     category_name: { type: SchemaType.STRING, description: "Standard accounting category" },
   },
   required: ["vendor_name", "amount", "currency", "date", "category_name"],
-};
+} as const satisfies ResponseSchema;
 
 export const getGeminiModel = () => {
-  // flash is extremely fast and cost-effective for data extraction
   return genAI.getGenerativeModel({
-    model: "gemini-3.5-flash",
+    model: "gemini-2.5-flash",
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema: expenseSchema,
-      temperature: 0.1, 
+      temperature: 0.1,
     },
   });
 };
