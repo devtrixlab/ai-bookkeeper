@@ -151,7 +151,7 @@ export default function ExpenseForm({ categories, onSuccess }: ExpenseFormProps)
           />
           <button
             type="submit"
-            disabled={isExtracting || !categories || categories.length === 0}
+            disabled={isExtracting || (!prompt.trim() && !imageBase64)}
             className="bg-blue-600 hover:bg-blue-700 text-white px-6 rounded-lg font-medium flex items-center justify-center disabled:opacity-50 transition-colors"
           >
             {isExtracting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}

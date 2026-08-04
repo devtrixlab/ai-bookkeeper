@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { createBrowserClient } from '@supabase/ssr';
 import { Loader2 } from 'lucide-react';
 import DashboardHeader from '@/components/dashboard/DashboardHeader';
 import ExpenseForm from '@/components/dashboard/ExpenseForm';
@@ -14,26 +14,41 @@ export default function Dashboard() {
   const [categories, setCategories] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Initialize the SSR-compatible client
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
   useEffect(() => {
     fetchInitialData();
   }, []);
 
   async function fetchInitialData() {
     setIsLoading(true);
-    const { data: cats } = await supabase.from('categories').select('*');
-    if (cats) setCategories(cats);
+    
+    // This will now correctly send your authenticated session cookies
+    const { data: cats, error: catsError } = await supabase.from('categories').select('*');
+    
+    if (catsError) {
+      console.error("Error fetching categories:", catsError);
+    } else if (cats) {
+      setCategories(cats);
+    }
+    
     await fetchTransactions();
     setIsLoading(false);
   }
 
   async function fetchTransactions() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('transactions')
       .select('*, categories(name)')
       .order('created_at', { ascending: false });
     
-    if (data) {
-      // Split the single database call into our two distinct UI states
+    if (error) {
+      console.error("Error fetching transactions:", error);
+    } else if (data) {
       setPendingTransactions(data.filter(t => !t.is_user_verified));
       setVerifiedTransactions(data.filter(t => t.is_user_verified));
     }
