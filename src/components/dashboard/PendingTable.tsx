@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { createBrowserClient } from '@supabase/ssr';
 import { Check, Trash2, Edit2, X } from 'lucide-react';
 
 type Transaction = {
@@ -20,22 +20,35 @@ export default function PendingTable({ transactions, categories, onDataChanged }
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Transaction>>({});
 
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
   async function handleVerify(id: string) {
-    await supabase.from('transactions').update({ is_user_verified: true }).eq('id', id);
+    const { error } = await supabase.from('transactions').update({ is_user_verified: true }).eq('id', id);
+    if (error) console.error("Verify error:", error);
     onDataChanged();
   }
 
   async function handleDelete(id: string) {
-    await supabase.from('transactions').delete().eq('id', id);
+    const { error } = await supabase.from('transactions').delete().eq('id', id);
+    if (error) console.error("Delete error:", error);
     onDataChanged();
   }
 
   async function handleSaveEdit() {
     if (!editingId) return;
-    await supabase.from('transactions').update({
-      date: editForm.date, vendor_name: editForm.vendor_name,
-      category_id: editForm.category_id, amount: editForm.amount, currency: editForm.currency
+    const safeAmount = typeof editForm.amount === 'number' && !isNaN(editForm.amount) ? editForm.amount : 0;
+    const { error } = await supabase.from('transactions').update({
+      date: editForm.date,
+      vendor_name: editForm.vendor_name,
+      category_id: editForm.category_id,
+      amount: safeAmount,
+      currency: editForm.currency
     }).eq('id', editingId);
+
+    if (error) console.error("Save edit error:", error);
     setEditingId(null);
     onDataChanged();
   }

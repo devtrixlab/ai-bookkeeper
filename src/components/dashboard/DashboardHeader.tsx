@@ -1,11 +1,15 @@
 'use client';
 
-import { supabase } from '@/lib/supabase';
+import { createBrowserClient } from '@supabase/ssr';
 import { LogOut, Receipt } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function DashboardHeader() {
   const router = useRouter();
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
   async function handleLogout() {
     await supabase.auth.signOut();
