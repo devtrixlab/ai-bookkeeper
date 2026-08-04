@@ -75,10 +75,15 @@ export default function ExpenseForm({ categories, onSuccess }: ExpenseFormProps)
     
     const aiData = await res.json();
 
-    // 4. Match the AI's category to your database categories (fallback to index 0)
-    const matchedCategory = categories.find(
+    // 4. Match the AI's category to your database categories safely
+    const matchedCategory = categories?.find(
       c => c.name.toLowerCase() === aiData.category_name?.toLowerCase()
-    ) || categories[0];
+    ) || (categories && categories.length > 0 ? categories[0] : null);
+
+    // If categories are empty/not loaded, stop the execution safely
+    if (!matchedCategory) {
+      throw new Error("Categories haven't loaded yet. Please refresh the page.");
+    }
 
     // 5. Insert the pending transaction into the database
     const { error: insertError } = await supabase.from('transactions').insert({
@@ -146,7 +151,7 @@ export default function ExpenseForm({ categories, onSuccess }: ExpenseFormProps)
           />
           <button
             type="submit"
-            disabled={isExtracting || (!prompt.trim() && !imageBase64)}
+            disabled={isExtracting || !categories || categories.length === 0}
             className="bg-blue-600 hover:bg-blue-700 text-white px-6 rounded-lg font-medium flex items-center justify-center disabled:opacity-50 transition-colors"
           >
             {isExtracting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
