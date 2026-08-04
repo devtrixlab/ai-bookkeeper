@@ -33,8 +33,21 @@ export async function signUpWithEmail(formData: FormData) {
   const password = formData.get('password') as string
   const supabase = await getSupabaseServerClient()
 
-  const { error } = await supabase.auth.signUp({ email, password })
+  const { data, error } = await supabase.auth.signUp({ email, password })
   if (error) return { error: error.message }
+
+  if (data?.user) {
+    try {
+      await supabase.from('profiles').upsert({
+        id: data.user.id,
+        email: data.user.email,
+        created_at: new Date().toISOString()
+      }, { onConflict: 'id' });
+    } catch {
+      // Profile table RLS fallback
+    }
+  }
+
   return { success: true }
 }
 
@@ -43,7 +56,20 @@ export async function signInWithEmail(formData: FormData) {
   const password = formData.get('password') as string
   const supabase = await getSupabaseServerClient()
 
-  const { error } = await supabase.auth.signInWithPassword({ email, password })
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
   if (error) return { error: error.message }
+
+  if (data?.user) {
+    try {
+      await supabase.from('profiles').upsert({
+        id: data.user.id,
+        email: data.user.email,
+        created_at: new Date().toISOString()
+      }, { onConflict: 'id' });
+    } catch {
+      // Profile table RLS fallback
+    }
+  }
+
   return { success: true }
 }

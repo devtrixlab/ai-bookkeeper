@@ -3,12 +3,14 @@
 import { useState } from 'react';
 import { signInWithEmail, signUpWithEmail } from '../actions/auth';
 import { useRouter } from 'next/navigation';
+import { Receipt, Mail, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
   const [isSignUp, setIsSignUp] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   async function handleSubmit(formData: FormData) {
@@ -21,7 +23,7 @@ export default function LoginPage() {
       if (result.error) {
         setError(result.error);
       } else {
-        setMessage('Account registered successfully! Please check your email or sign in.');
+        setMessage('Account registered successfully! Please sign in with your credentials.');
         setIsSignUp(false);
       }
       setLoading(false);
@@ -38,81 +40,116 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-md space-y-8 rounded-xl bg-white p-8 shadow-md border border-gray-100">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12">
+      <div className="w-full max-w-md space-y-8 rounded-2xl bg-white p-8 shadow-sm border border-gray-100">
+        
+        {/* App Brand Header */}
         <div className="text-center">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-50 text-blue-600 mb-3">
+            <Receipt className="w-6 h-6" />
+          </div>
           <h2 className="text-2xl font-bold tracking-tight text-gray-900">
-            {isSignUp ? 'Create your account' : 'Sign in to your account'}
+            {isSignUp ? 'Create your account' : 'Welcome back'}
           </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            AI-Powered Bookkeeping Architecture
+          <p className="mt-1 text-sm text-gray-500">
+            AI-Powered Bookkeeper & Expense Tracker
           </p>
         </div>
 
-        <form action={handleSubmit} className="mt-8 space-y-6">
-          <div className="space-y-4 rounded-md shadow-sm">
-            <div>
-              <label htmlFor="email" className="sr-only">Email address</label>
+        {/* Tab Toggle */}
+        <div className="flex rounded-lg bg-gray-100 p-1 text-sm font-medium">
+          <button
+            type="button"
+            onClick={() => { setIsSignUp(false); setError(null); setMessage(null); }}
+            className={`flex-1 py-2 rounded-md transition-all ${!isSignUp ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+          >
+            Sign In
+          </button>
+          <button
+            type="button"
+            onClick={() => { setIsSignUp(true); setError(null); setMessage(null); }}
+            className={`flex-1 py-2 rounded-md transition-all ${isSignUp ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+          >
+            Register
+          </button>
+        </div>
+
+        {/* Banners */}
+        {error && (
+          <div className="p-3 text-sm text-red-700 bg-red-50 rounded-lg border border-red-100 font-medium text-center">
+            {error}
+          </div>
+        )}
+
+        {message && (
+          <div className="p-3 text-sm text-green-700 bg-green-50 rounded-lg border border-green-100 font-medium text-center">
+            {message}
+          </div>
+        )}
+
+        {/* Form */}
+        <form action={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">Email Address</label>
+            <div className="relative">
+              <Mail className="w-5 h-5 text-gray-400 absolute left-3 top-2.5" />
               <input
                 id="email"
                 name="email"
                 type="email"
                 required
-                className="relative block w-full rounded-t-md border-0 py-2 px-3 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:z-10 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
-                placeholder="Email address"
+                className="w-full rounded-lg border border-gray-300 pl-10 pr-4 py-2 text-gray-900 text-sm focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all"
+                placeholder="you@example.com"
               />
             </div>
-            <div>
-              <label htmlFor="password" className="sr-only">Password</label>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">Password</label>
+            <div className="relative">
+              <Lock className="w-5 h-5 text-gray-400 absolute left-3 top-2.5" />
               <input
                 id="password"
                 name="password"
-                type="password"
+                type={showPassword ? "text" : "password"}
                 required
                 minLength={6}
-                className="relative block w-full rounded-b-md border-0 py-2 px-3 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:z-10 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
-                placeholder="Password"
+                className="w-full rounded-lg border border-gray-300 pl-10 pr-10 py-2 text-gray-900 text-sm focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all"
+                placeholder="••••••••"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+              >
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
             </div>
           </div>
 
-          {error && (
-            <div className="text-sm text-red-500 text-center font-medium">
-              {error}
-            </div>
-          )}
-
-          {message && (
-            <div className="text-sm text-green-600 text-center font-medium bg-green-50 p-2 rounded-md border border-green-200">
-              {message}
-            </div>
-          )}
-
-          <div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex w-full justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50"
-            >
-              {loading ? 'Processing...' : isSignUp ? 'Sign Up' : 'Sign In'}
-            </button>
-          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 disabled:opacity-50 transition-all flex items-center justify-center cursor-pointer"
+          >
+            {loading ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : isSignUp ? (
+              'Create Account'
+            ) : (
+              'Sign In'
+            )}
+          </button>
         </form>
 
-        <div className="text-center text-sm">
-          <button
-            type="button"
-            onClick={() => {
-              setIsSignUp(!isSignUp);
-              setError(null);
-            }}
-            className="font-semibold text-blue-600 hover:text-blue-500 transition-colors"
-          >
-            {isSignUp
-              ? 'Already have an account? Sign In'
-              : "Don't have an account? Sign Up"}
-          </button>
+        <div className="text-center text-xs text-gray-500">
+          {isSignUp ? (
+            <p>By registering, your account profile will be created automatically.</p>
+          ) : (
+            <p>Enter your credentials to access your financial dashboard.</p>
+          )}
         </div>
+
       </div>
     </div>
   );
