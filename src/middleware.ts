@@ -49,7 +49,7 @@ export async function middleware(request: NextRequest) {
   // 2. If user exists and tries to view the login page -> kick to dashboard
   if (user && isLoginRoute) {
     const url = request.nextUrl.clone()
-    url.pathname = '/'
+    url.pathname = '/dashboard'
     return NextResponse.redirect(url)
   }
 

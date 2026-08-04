@@ -1,0 +1,291 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { createBrowserClient } from '@supabase/ssr';
+import { 
+  Receipt, 
+  Bell, 
+  Settings, 
+  LogOut, 
+  User as UserIcon, 
+  ChevronDown, 
+  Sparkles,
+  LayoutDashboard,
+  FileSpreadsheet,
+  BarChart3,
+  CheckCircle2,
+  Menu,
+  X
+} from 'lucide-react';
+
+interface HeaderNavProps {
+  activeTab: 'overview' | 'ledger' | 'analytics';
+  setActiveTab: (tab: 'overview' | 'ledger' | 'analytics') => void;
+  userEmail?: string;
+  pendingCount?: number;
+}
+
+export default function HeaderNav({ 
+  activeTab, 
+  setActiveTab, 
+  userEmail = 'user@aibookkeeper.com',
+  pendingCount = 0
+}: HeaderNavProps) {
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const router = useRouter();
+
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.push('/login');
+    router.refresh();
+  }
+
+  // Get user initials
+  const initials = userEmail ? userEmail.substring(0, 2).toUpperCase() : 'AI';
+
+  return (
+    <header className="sticky top-0 z-40 w-full bg-white/80 backdrop-blur-md border-b border-gray-100 shadow-xs">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+          
+          {/* LEFT: Logo & Brand Badge */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+                <Receipt className="w-5 h-5" />
+              </div>
+              <div className="hidden sm:block">
+                <span className="font-extrabold text-lg text-gray-900 tracking-tight flex items-center gap-1.5">
+                  Loop<span className="text-blue-600">AI</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 font-semibold border border-blue-100 uppercase">
+                    v2.0
+                  </span>
+                </span>
+              </div>
+            </div>
+
+            {/* Quick Brand Badges (Like reference image) */}
+            <div className="hidden md:flex items-center gap-1 pl-3 border-l border-gray-200">
+              <span className="w-7 h-7 rounded-full bg-emerald-500 text-white text-[11px] font-bold flex items-center justify-center shadow-xs">Up</span>
+              <span className="w-7 h-7 rounded-full bg-blue-500 text-white text-[11px] font-bold flex items-center justify-center shadow-xs">Yr</span>
+              <span className="w-7 h-7 rounded-full bg-indigo-500 text-white text-[11px] font-bold flex items-center justify-center shadow-xs">Fi</span>
+              <span className="w-6 h-6 rounded-full border border-dashed border-gray-300 text-gray-400 text-[10px] font-medium flex items-center justify-center">
+                +
+              </span>
+            </div>
+          </div>
+
+          {/* CENTER: Navigation Pills (Reference: Untitled.png) */}
+          <nav className="hidden md:flex items-center gap-1 bg-gray-100/80 p-1 rounded-full border border-gray-200/60">
+            <button
+              onClick={() => setActiveTab('overview')}
+              className={`flex items-center gap-2 px-5 py-1.5 rounded-full text-sm font-medium transition-all cursor-pointer ${
+                activeTab === 'overview'
+                  ? 'bg-white text-gray-900 shadow-sm border border-gray-200/80 font-semibold'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4 text-blue-600" />
+              <span>Overview</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('ledger')}
+              className={`flex items-center gap-2 px-5 py-1.5 rounded-full text-sm font-medium transition-all cursor-pointer ${
+                activeTab === 'ledger'
+                  ? 'bg-white text-gray-900 shadow-sm border border-gray-200/80 font-semibold'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              }`}
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              <span>Ledger</span>
+              {pendingCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center">
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('analytics')}
+              className={`flex items-center gap-2 px-5 py-1.5 rounded-full text-sm font-medium transition-all cursor-pointer ${
+                activeTab === 'analytics'
+                  ? 'bg-white text-gray-900 shadow-sm border border-gray-200/80 font-semibold'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4 text-purple-600" />
+              <span>Analytics</span>
+            </button>
+          </nav>
+
+          {/* RIGHT: Notifications, Settings & User Profile Avatar */}
+          <div className="flex items-center gap-2">
+            
+            {/* Settings Button */}
+            <button 
+              onClick={() => setActiveTab('analytics')}
+              className="p-2 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-full transition-colors hidden sm:flex cursor-pointer"
+              title="Settings"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+
+            {/* Notifications Bell */}
+            <div className="relative">
+              <button 
+                onClick={() => { setShowNotifications(!showNotifications); setShowUserDropdown(false); }}
+                className="p-2 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-full transition-colors relative cursor-pointer"
+                title="Notifications"
+              >
+                <Bell className="w-5 h-5" />
+                {pendingCount > 0 && (
+                  <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-amber-500 rounded-full ring-2 ring-white animate-pulse" />
+                )}
+              </button>
+
+              {/* Notifications Dropdown */}
+              {showNotifications && (
+                <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-gray-100 py-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="px-4 pb-2 border-b border-gray-100 flex items-center justify-between">
+                    <span className="font-semibold text-sm text-gray-900">Notifications</span>
+                    <span className="text-xs text-blue-600 font-medium cursor-pointer">Mark all read</span>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto divide-y divide-gray-50">
+                    {pendingCount > 0 ? (
+                      <div className="p-3 hover:bg-gray-50 transition-colors cursor-pointer flex gap-3 items-start">
+                        <div className="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                          <Bell className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold text-gray-800">
+                            {pendingCount} Pending Transaction{pendingCount > 1 ? 's' : ''}
+                          </p>
+                          <p className="text-[11px] text-gray-500 mt-0.5">
+                            AI extracted new expense drafts awaiting your verification.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-4 text-center text-xs text-gray-400">
+                        <CheckCircle2 className="w-6 h-6 text-emerald-500 mx-auto mb-1" />
+                        All caught up! No pending alerts.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* User Profile Avatar (Reference: Right side of Untitled.png) */}
+            <div className="relative">
+              <button
+                onClick={() => { setShowUserDropdown(!showUserDropdown); setShowNotifications(false); }}
+                className="flex items-center gap-2 p-1 rounded-full hover:bg-gray-100 transition-colors cursor-pointer border border-gray-200"
+              >
+                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-500 text-white font-bold text-xs flex items-center justify-center shadow-xs">
+                  {initials}
+                </div>
+                <div className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white" />
+                <ChevronDown className="w-3.5 h-3.5 text-gray-500 mr-1 hidden sm:block" />
+              </button>
+
+              {/* User Dropdown */}
+              {showUserDropdown && (
+                <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-gray-100 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="px-4 py-3 border-b border-gray-100">
+                    <p className="text-xs font-medium text-gray-400">Signed in as</p>
+                    <p className="text-sm font-semibold text-gray-900 truncate mt-0.5">{userEmail}</p>
+                    <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md bg-gradient-to-r from-blue-500 to-indigo-600 text-white text-[10px] font-semibold">
+                      <Sparkles className="w-3 h-3" /> Pro Member
+                    </span>
+                  </div>
+
+                  <div className="py-1">
+                    <button
+                      onClick={() => { setActiveTab('overview'); setShowUserDropdown(false); }}
+                      className="w-full text-left px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2 cursor-pointer"
+                    >
+                      <UserIcon className="w-4 h-4 text-gray-400" /> My Account
+                    </button>
+                    <button
+                      onClick={() => { setActiveTab('analytics'); setShowUserDropdown(false); }}
+                      className="w-full text-left px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2 cursor-pointer"
+                    >
+                      <Settings className="w-4 h-4 text-gray-400" /> App Settings
+                    </button>
+                  </div>
+
+                  <div className="pt-1 border-t border-gray-100">
+                    <button
+                      onClick={handleLogout}
+                      className="w-full text-left px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 flex items-center gap-2 cursor-pointer"
+                    >
+                      <LogOut className="w-4 h-4" /> Sign Out
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Mobile Hamburger Menu Toggle */}
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg md:hidden cursor-pointer"
+            >
+              {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            </button>
+
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile Drawer Navigation */}
+      {mobileMenuOpen && (
+        <div className="md:hidden border-t border-gray-100 bg-white px-4 pt-2 pb-4 space-y-2">
+          <button
+            onClick={() => { setActiveTab('overview'); setMobileMenuOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium ${
+              activeTab === 'overview' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <LayoutDashboard className="w-5 h-5 text-blue-600" /> Overview Dashboard
+          </button>
+
+          <button
+            onClick={() => { setActiveTab('ledger'); setMobileMenuOpen(false); }}
+            className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium ${
+              activeTab === 'ledger' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <FileSpreadsheet className="w-5 h-5 text-emerald-600" /> Verified Ledger
+            </div>
+            {pendingCount > 0 && (
+              <span className="px-2 py-0.5 bg-amber-500 text-white rounded-full text-xs font-bold">
+                {pendingCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => { setActiveTab('analytics'); setMobileMenuOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium ${
+              activeTab === 'analytics' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <BarChart3 className="w-5 h-5 text-purple-600" /> Analytics & Reports
+          </button>
+        </div>
+      )}
+    </header>
+  );
+}
