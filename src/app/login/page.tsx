@@ -5,24 +5,32 @@ import { signInWithEmail, signUpWithEmail } from '../actions/auth';
 import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
   const router = useRouter();
 
   async function handleSubmit(formData: FormData) {
     setLoading(true);
     setError(null);
+    setMessage(null);
 
-    const action = isSignUp ? signUpWithEmail : signInWithEmail;
-    const result = await action(formData);
-
-    if (result.error) {
-      setError(result.error);
+    if (isSignUp) {
+      const result = await signUpWithEmail(formData);
+      if (result.error) {
+        setError(result.error);
+      } else {
+        setMessage('Account registered successfully! Please check your email or sign in.');
+        setIsSignUp(false);
+      }
       setLoading(false);
     } else {
-      // Upon success, redirect the user to the main dashboard
-      router.push('/');
+      const result = await signInWithEmail(formData);
+      if (result.error) {
+        setError(result.error);
+        setLoading(false);
+      } else {
+        router.push('/');
+        router.refresh();
+      }
     }
   }
 
@@ -68,6 +76,12 @@ export default function LoginPage() {
           {error && (
             <div className="text-sm text-red-500 text-center font-medium">
               {error}
+            </div>
+          )}
+
+          {message && (
+            <div className="text-sm text-green-600 text-center font-medium bg-green-50 p-2 rounded-md border border-green-200">
+              {message}
             </div>
           )}
 
