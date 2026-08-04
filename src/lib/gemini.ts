@@ -16,7 +16,7 @@ export const expenseSchema = {
 
 export const getGeminiModel = () => {
   return genAI.getGenerativeModel({
-    model: "gemini-2.5-flash",
+    model: "gemini-3.6-flash",
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema: expenseSchema as any,
