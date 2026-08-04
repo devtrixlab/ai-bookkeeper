@@ -19,7 +19,7 @@ export const expenseSchema = {
 export const getGeminiModel = () => {
   // flash is extremely fast and cost-effective for data extraction
   return genAI.getGenerativeModel({
-    model: "gemini-2.5-flash",
+    model: "gemini-3.5-flash",
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema: expenseSchema,
