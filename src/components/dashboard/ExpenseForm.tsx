@@ -76,13 +76,28 @@ export default function ExpenseForm({ categories, onSuccess }: ExpenseFormProps)
     const aiData = await res.json();
 
     // 4. Match the AI's category to your database categories safely
+    let targetCategoryId: string | null = null;
+
     const matchedCategory = categories?.find(
       c => c.name.toLowerCase() === aiData.category_name?.toLowerCase()
-    ) || (categories && categories.length > 0 ? categories[0] : null);
+    );
 
-    // If categories are empty/not loaded, stop the execution safely
-    if (!matchedCategory) {
-      throw new Error("Categories haven't loaded yet. Please refresh the page.");
+    if (matchedCategory) {
+      targetCategoryId = matchedCategory.id;
+    } else if (categories && categories.length > 0) {
+      targetCategoryId = categories[0].id;
+    } else {
+      // Auto-create category if database has no categories seeded yet
+      const { data: newCat, error: catError } = await supabase
+        .from('categories')
+        .insert({ name: aiData.category_name || "General Expenses" })
+        .select()
+        .single();
+      
+      if (catError || !newCat) {
+        throw new Error("No categories found in database and auto-creation failed.");
+      }
+      targetCategoryId = newCat.id;
     }
 
     // 5. Insert the pending transaction into the database
@@ -92,7 +107,7 @@ export default function ExpenseForm({ categories, onSuccess }: ExpenseFormProps)
       currency: aiData.currency || 'PKR',
       date: aiData.date,
       vendor_name: aiData.vendor_name,
-      category_id: matchedCategory.id,
+      category_id: targetCategoryId,
       is_user_verified: false
     });
 

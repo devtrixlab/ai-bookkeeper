@@ -33,11 +33,11 @@ export default function VerifiedLedger({ transactions }: VerifiedLedgerProps) {
     
     // Map transactions to CSV rows
     const rows = transactions.map(t => [
-      t.date,
-      `"${t.vendor_name.replace(/"/g, '""')}"`, // Escape quotes for safety
+      t.date || '',
+      `"${(t.vendor_name || 'Unknown').replace(/"/g, '""')}"`, // Escape quotes for safety
       `"${t.categories?.name || 'Uncategorized'}"`,
-      t.amount,
-      t.currency
+      t.amount || 0,
+      t.currency || 'PKR'
     ]);
 
     // Combine headers and rows into a single CSV string
