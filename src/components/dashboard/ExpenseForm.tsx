@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { supabase } from '@/lib/supabase';
+import { createBrowserClient } from '@supabase/ssr';
 import { Send, Loader2, UploadCloud, X } from 'lucide-react';
 
 type Category = { id: string; name: string; };
@@ -40,52 +40,71 @@ export default function ExpenseForm({ categories, onSuccess }: ExpenseFormProps)
   }
 
   async function handleExtract(e: React.FormEvent) {
-    e.preventDefault();
-    if (!prompt.trim() && !imageBase64) return;
+  e.preventDefault();
+  if (!prompt.trim() && !imageBase64) return;
+  
+  setIsExtracting(true);
+  setError(null);
+
+  try {
+    // 1. Instantiate the SSR-compatible Supabase client
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+
+    // 2. Safely fetch the user session
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     
-    setIsExtracting(true);
-    setError(null);
-
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Authentication error.");
-
-      const submitPrompt = prompt.trim() || "Extract expense details from this receipt.";
-
-      const res = await fetch('/api/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: submitPrompt, image: imageBase64 })
-      });
-      
-      if (!res.ok) throw new Error("Failed to process expense.");
-      const aiData = await res.json();
-
-      const matchedCategory = categories.find(
-        c => c.name.toLowerCase() === aiData.category_name?.toLowerCase()
-      ) || categories[0];
-
-      const { error: insertError } = await supabase.from('transactions').insert({
-        user_id: user.id,
-        amount: aiData.amount,
-        currency: aiData.currency || 'PKR',
-        date: aiData.date,
-        vendor_name: aiData.vendor_name,
-        category_id: matchedCategory.id,
-        is_user_verified: false
-      });
-
-      if (insertError) throw insertError;
-      
-      setPrompt('');
-      clearImage();
-      onSuccess();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsExtracting(false);
+    if (authError || !user) {
+      throw new Error("Authentication error. Please refresh the page or sign in again.");
     }
+
+    // 3. Prepare and send the payload to your Gemini API route
+    const submitPrompt = prompt.trim() || "Extract expense details from this receipt.";
+
+    const res = await fetch('/api/extract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: submitPrompt, image: imageBase64 })
+    });
+    
+    if (!res.ok) {
+      throw new Error("Failed to process expense via AI. Please try again.");
+    }
+    
+    const aiData = await res.json();
+
+    // 4. Match the AI's category to your database categories (fallback to index 0)
+    const matchedCategory = categories.find(
+      c => c.name.toLowerCase() === aiData.category_name?.toLowerCase()
+    ) || categories[0];
+
+    // 5. Insert the pending transaction into the database
+    const { error: insertError } = await supabase.from('transactions').insert({
+      user_id: user.id,
+      amount: aiData.amount,
+      currency: aiData.currency || 'PKR',
+      date: aiData.date,
+      vendor_name: aiData.vendor_name,
+      category_id: matchedCategory.id,
+      is_user_verified: false
+    });
+
+    if (insertError) throw insertError;
+    
+    // 6. Reset form states and trigger UI refresh
+    setPrompt('');
+    clearImage();
+    onSuccess();
+
+  } catch (err: any) {
+    console.error("Expense extraction failed:", err);
+    setError(err.message || "An unexpected error occurred.");
+  } finally {
+    setIsExtracting(false);
   }
+}
 
   return (
     <form onSubmit={handleExtract} className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 relative space-y-4">
