@@ -10,7 +10,6 @@ import {
   LogOut, 
   User as UserIcon, 
   ChevronDown, 
-  Sparkles,
   LayoutDashboard,
   FileSpreadsheet,
   BarChart3,
@@ -62,28 +61,15 @@ export default function HeaderNav({
               <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
                 <Receipt className="w-5 h-5" />
               </div>
-              <div className="hidden sm:block">
+              <div>
                 <span className="font-extrabold text-lg text-gray-900 tracking-tight flex items-center gap-1.5">
-                  Loop<span className="text-blue-600">AI</span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700 font-semibold border border-blue-100 uppercase">
-                    v2.0
-                  </span>
+                  Inscribe <span className="text-blue-600">AI</span>
                 </span>
               </div>
             </div>
-
-            {/* Quick Brand Badges (Like reference image) */}
-            <div className="hidden md:flex items-center gap-1 pl-3 border-l border-gray-200">
-              <span className="w-7 h-7 rounded-full bg-emerald-500 text-white text-[11px] font-bold flex items-center justify-center shadow-xs">Up</span>
-              <span className="w-7 h-7 rounded-full bg-blue-500 text-white text-[11px] font-bold flex items-center justify-center shadow-xs">Yr</span>
-              <span className="w-7 h-7 rounded-full bg-indigo-500 text-white text-[11px] font-bold flex items-center justify-center shadow-xs">Fi</span>
-              <span className="w-6 h-6 rounded-full border border-dashed border-gray-300 text-gray-400 text-[10px] font-medium flex items-center justify-center">
-                +
-              </span>
-            </div>
           </div>
 
-          {/* CENTER: Navigation Pills (Reference: Untitled.png) */}
+          {/* CENTER: Navigation Pills */}
           <nav className="hidden md:flex items-center gap-1 bg-gray-100/80 p-1 rounded-full border border-gray-200/60">
             <button
               onClick={() => setActiveTab('overview')}
@@ -127,18 +113,9 @@ export default function HeaderNav({
             </button>
           </nav>
 
-          {/* RIGHT: Notifications, Settings & User Profile Avatar */}
+          {/* RIGHT: Notifications & User Profile Avatar */}
           <div className="flex items-center gap-2">
             
-            {/* Settings Button */}
-            <button 
-              onClick={() => setActiveTab('analytics')}
-              className="p-2 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-full transition-colors hidden sm:flex cursor-pointer"
-              title="Settings"
-            >
-              <Settings className="w-5 h-5" />
-            </button>
-
             {/* Notifications Bell */}
             <div className="relative">
               <button 
@@ -185,7 +162,7 @@ export default function HeaderNav({
               )}
             </div>
 
-            {/* User Profile Avatar (Reference: Right side of Untitled.png) */}
+            {/* User Profile Avatar */}
             <div className="relative">
               <button
                 onClick={() => { setShowUserDropdown(!showUserDropdown); setShowNotifications(false); }}
@@ -201,14 +178,6 @@ export default function HeaderNav({
               {/* User Dropdown */}
               {showUserDropdown && (
                 <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-gray-100 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                  <div className="px-4 py-3 border-b border-gray-100">
-                    <p className="text-xs font-medium text-gray-400">Signed in as</p>
-                    <p className="text-sm font-semibold text-gray-900 truncate mt-0.5">{userEmail}</p>
-                    <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md bg-gradient-to-r from-blue-500 to-indigo-600 text-white text-[10px] font-semibold">
-                      <Sparkles className="w-3 h-3" /> Pro Member
-                    </span>
-                  </div>
-
                   <div className="py-1">
                     <button
                       onClick={() => { setActiveTab('overview'); setShowUserDropdown(false); }}
