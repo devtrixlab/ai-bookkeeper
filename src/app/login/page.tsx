@@ -5,6 +5,9 @@ import { signInWithEmail, signUpWithEmail } from '../actions/auth';
 import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const router = useRouter();
 
