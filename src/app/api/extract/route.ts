@@ -1,12 +1,39 @@
 import { NextResponse } from "next/server";
 import { getGeminiModel } from "@/lib/gemini";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
 export async function POST(request: Request) {
   try {
+    const cookieStore = await cookies();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(({ name, value, options }) =>
+                cookieStore.set(name, value, options)
+              );
+            } catch {
+              // Ignored in server route handlers
+            }
+          },
+        },
+      }
+    );
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized access." }, { status: 401 });
+    }
+
     const body = await request.json();
-    
-    // FIXED: Destructure 'image' to match your frontend fetch payload
-    const { prompt, image: base64Image, mimeType = "image/jpeg" } = body;
+    const { prompt, image: base64Image } = body;
 
     // 1. Validation
     if (!prompt && !base64Image) {
@@ -14,6 +41,19 @@ export async function POST(request: Request) {
         { error: "Please provide a prompt or an image." },
         { status: 400 }
       );
+    }
+
+    let cleanBase64 = base64Image;
+    let detectedMimeType = "image/jpeg";
+
+    if (base64Image && typeof base64Image === 'string') {
+      const dataUrlMatches = base64Image.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+      if (dataUrlMatches) {
+        detectedMimeType = dataUrlMatches[1];
+        cleanBase64 = dataUrlMatches[2];
+      } else {
+        cleanBase64 = base64Image.replace(/^data:image\/[a-zA-Z+]+;base64,/, '');
+      }
     }
 
     const model = getGeminiModel();
@@ -46,12 +86,11 @@ export async function POST(request: Request) {
       promptParts.push({ text: prompt });
     }
 
-    if (base64Image) {
-      // The frontend must send raw base64, stripping the "data:image/jpeg;base64," prefix
+    if (cleanBase64) {
       promptParts.push({
         inlineData: {
-          data: base64Image,
-          mimeType: mimeType,
+          data: cleanBase64,
+          mimeType: detectedMimeType,
         },
       });
     }
