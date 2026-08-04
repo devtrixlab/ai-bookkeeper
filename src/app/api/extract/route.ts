@@ -27,9 +27,22 @@ export async function POST(request: Request) {
       }
     );
 
-    const { data: { user } } = await supabase.auth.getUser();
+    let user = null;
+    const { data: cookieAuthData } = await supabase.auth.getUser();
+    user = cookieAuthData?.user;
+
+    // Fallback: Check Authorization header for Bearer token
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized access." }, { status: 401 });
+      const authHeader = request.headers.get("authorization");
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        const token = authHeader.substring(7);
+        const { data: tokenAuthData } = await supabase.auth.getUser(token);
+        user = tokenAuthData?.user;
+      }
+    }
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized. Please sign in to log expenses." }, { status: 401 });
     }
 
     const body = await request.json();

@@ -54,10 +54,11 @@ export default function ExpenseForm({ categories, onSuccess }: ExpenseFormProps)
     );
 
     // 2. Safely fetch the user session
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const { data: { session }, error: authError } = await supabase.auth.getSession();
+    const { data: { user } } = await supabase.auth.getUser();
     
     if (authError || !user) {
-      throw new Error("Authentication error. Please refresh the page or sign in again.");
+      throw new Error("Authentication error. Please sign in or refresh the page.");
     }
 
     // 3. Prepare and send the payload to your Gemini API route
@@ -65,12 +66,16 @@ export default function ExpenseForm({ categories, onSuccess }: ExpenseFormProps)
 
     const res = await fetch('/api/extract', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+      },
       body: JSON.stringify({ prompt: submitPrompt, image: imageBase64 })
     });
     
     if (!res.ok) {
-      throw new Error("Failed to process expense via AI. Please try again.");
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `Failed to process expense via AI (${res.status}). Please try again.`);
     }
     
     const aiData = await res.json();
@@ -95,9 +100,16 @@ export default function ExpenseForm({ categories, onSuccess }: ExpenseFormProps)
         .single();
       
       if (catError || !newCat) {
-        throw new Error("No categories found in database and auto-creation failed.");
+        // Query any existing category as last fallback
+        const { data: existingCats } = await supabase.from('categories').select('id').limit(1);
+        if (existingCats && existingCats.length > 0) {
+          targetCategoryId = existingCats[0].id;
+        } else {
+          throw new Error("Category setup error: Database categories table is unpopulated.");
+        }
+      } else {
+        targetCategoryId = newCat.id;
       }
-      targetCategoryId = newCat.id;
     }
 
     // 5. Insert the pending transaction into the database
@@ -105,13 +117,15 @@ export default function ExpenseForm({ categories, onSuccess }: ExpenseFormProps)
       user_id: user.id,
       amount: aiData.amount,
       currency: aiData.currency || 'PKR',
-      date: aiData.date,
-      vendor_name: aiData.vendor_name,
+      date: aiData.date || new Date().toISOString().split('T')[0],
+      vendor_name: aiData.vendor_name || 'Unknown Merchant',
       category_id: targetCategoryId,
       is_user_verified: false
     });
 
-    if (insertError) throw insertError;
+    if (insertError) {
+      throw new Error(`Failed to save to database: ${insertError.message}`);
+    }
     
     // 6. Reset form states and trigger UI refresh
     setPrompt('');
