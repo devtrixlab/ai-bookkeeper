@@ -4,7 +4,9 @@ import { getGeminiModel } from "@/lib/gemini";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { prompt, base64Image, mimeType = "image/jpeg" } = body;
+    
+    // FIXED: Destructure 'image' to match your frontend fetch payload
+    const { prompt, image: base64Image, mimeType = "image/jpeg" } = body;
 
     // 1. Validation
     if (!prompt && !base64Image) {
@@ -26,7 +28,17 @@ export async function POST(request: Request) {
         2. Currency: Identify the currency. If no currency is visible or mentioned, default to PKR.
         3. Date: Format strictly as YYYY-MM-DD. If the year is missing, assume the current year.
         4. Vendor: Extract the exact merchant or vendor name. Clean up messy store terminal names.
-        5. Category: Assign the most logical standard accounting category.`
+        5. Category: Assign the most logical standard accounting category.
+        
+        OUTPUT FORMAT:
+        You must respond ONLY with a raw JSON object matching this schema. Do not include markdown formatting or backticks:
+        {
+          "amount": number,
+          "currency": "string",
+          "date": "YYYY-MM-DD",
+          "vendor_name": "string",
+          "category_name": "string"
+        }`
       },
     ];
 
@@ -48,8 +60,9 @@ export async function POST(request: Request) {
     const result = await model.generateContent(promptParts);
     const responseText = result.response.text();
     
-    // 4. Formatting: Gemini guarantees this string will match our schema perfectly
-    const structuredData = JSON.parse(responseText);
+    // 4. Formatting: Strip markdown code blocks before parsing to prevent crashes
+    const cleanedText = responseText.replace(/```json\n?|```/g, '').trim();
+    const structuredData = JSON.parse(cleanedText);
 
     return NextResponse.json(structuredData, { status: 200 });
 
