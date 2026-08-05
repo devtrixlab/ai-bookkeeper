@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { prompt, image: base64Image } = body;
+    const { prompt, image: base64Image, history = [] } = body;
 
     // 1. Validation
     if (!prompt && !base64Image) {
@@ -71,50 +71,89 @@ export async function POST(request: Request) {
 
     const model = getGeminiModel();
 
-    // 2. Construct the Payload
-    const promptParts: any[] = [
-      {
-        text: `SYSTEM INSTRUCTION: You are an expert autonomous bookkeeper and forensic accountant. Extract structured financial data from the provided user input. 
-        
-        RULES:
-        1. Amount: Extract the final total paid. Do not extract subtotals or tax amounts as the main total.
-        2. Currency: Identify the currency. If no currency is visible or mentioned, default to PKR.
-        3. Date: Format strictly as YYYY-MM-DD. If the year is missing, assume the current year.
-        4. Vendor: Extract the exact merchant or vendor name. Clean up messy store terminal names.
-        5. Category: Assign the most logical standard accounting category.
-        
-        OUTPUT FORMAT:
-        You must respond ONLY with a raw JSON object matching this schema. Do not include markdown formatting or backticks:
-        {
-          "amount": number,
-          "currency": "string",
-          "date": "YYYY-MM-DD",
-          "vendor_name": "string",
-          "category_name": "string"
-        }`
-      },
-    ];
+    // 2. System Instruction
+    const systemInstruction = `You are LoopAI, an expert autonomous bookkeeper and forensic accountant.
+    
+    You must classify the user's intent and extract structured financial data if they are logging an expense.
+    
+    RULES FOR EXPENSE LOGGING (LOG_EXPENSE):
+    1. If the user is trying to log an expense but is missing CRITICAL fields (amount, vendor_name, date), DO NOT guess them. 
+    2. Instead, set "is_complete": false and ask a conversational "clarification_question" to get the missing info.
+    3. If they provide an image, validate if it's a legible receipt. If not, set "is_valid_receipt": false.
+    4. If the expense is complete, set "is_complete": true and provide the expense_data.
+    
+    RULES FOR QUERIES (QUERY_FINANCES) OR HELP (GENERAL_HELP):
+    1. If the user asks a question about their spending or how to use the app, do not extract expense data.
+    2. Provide a helpful "conversational_response" instead.
+    
+    OUTPUT FORMAT:
+    You must respond ONLY with a raw JSON object matching this schema. Do not include markdown formatting or backticks:
+    {
+      "intent": "LOG_EXPENSE" | "QUERY_FINANCES" | "GENERAL_HELP",
+      "is_valid_receipt": boolean,
+      "is_complete": boolean,
+      "clarification_question": "string | null",
+      "conversational_response": "string | null",
+      "expense_data": {
+        "amount": number | null,
+        "currency": "string",
+        "date": "YYYY-MM-DD",
+        "vendor_name": "string | null",
+        "category_name": "string | null"
+      }
+    }`;
 
-    if (prompt) {
-      promptParts.push({ text: prompt });
+    // 3. Construct multi-turn contents
+    const contents: any[] = [];
+
+    // Map passed history to Gemini format
+    for (const msg of history) {
+      if (msg.sender === 'user') {
+        contents.push({ role: 'user', parts: [{ text: msg.text }] });
+      } else if (msg.sender === 'ai') {
+        // Only push text AI responses to context
+        if (msg.text) {
+          contents.push({ role: 'model', parts: [{ text: msg.text }] });
+        }
+      }
     }
 
+    // Current turn parts
+    const currentParts: any[] = [];
     if (cleanBase64) {
-      promptParts.push({
+      currentParts.push({
         inlineData: {
           data: cleanBase64,
           mimeType: detectedMimeType,
         },
       });
     }
+    if (prompt) {
+      currentParts.push({ text: prompt });
+    }
 
-    // 3. Execution
-    const result = await model.generateContent(promptParts);
+    contents.push({ role: 'user', parts: currentParts });
+
+    // Ensure we start with system instruction
+    const finalContents = [
+      { role: 'user', parts: [{ text: systemInstruction }] },
+      { role: 'model', parts: [{ text: 'Understood. I will respond strictly in the requested JSON format.' }] },
+      ...contents
+    ];
+
+    // 4. Execution
+    const result = await model.generateContent({ contents: finalContents });
     const responseText = result.response.text();
     
-    // 4. Formatting: Strip markdown code blocks before parsing to prevent crashes
+    // 5. Formatting: Strip markdown code blocks before parsing
     const cleanedText = responseText.replace(/```json\n?|```/g, '').trim();
-    const structuredData = JSON.parse(cleanedText);
+    let structuredData;
+    try {
+      structuredData = JSON.parse(cleanedText);
+    } catch (e) {
+      console.error("Failed to parse JSON from AI response:", cleanedText);
+      throw new Error("AI returned malformed JSON response.");
+    }
 
     return NextResponse.json(structuredData, { status: 200 });
 

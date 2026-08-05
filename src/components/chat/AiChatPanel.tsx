@@ -97,7 +97,8 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
       timestamp
     };
 
-    setMessages(prev => [...prev, newUserMsg]);
+    const updatedMessages = [...messages, newUserMsg];
+    setMessages(updatedMessages);
     setPrompt('');
     clearImage();
     setIsExtracting(true);
@@ -111,14 +112,14 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
         throw new Error("Authentication required. Please sign in.");
       }
 
-      // 3. Call AI Extract Route
+      // 3. Call AI Extract Route with History
       const res = await fetch('/api/extract', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
         },
-        body: JSON.stringify({ prompt: userText, image: currentImage })
+        body: JSON.stringify({ prompt: userText, image: currentImage, history: updatedMessages })
       });
 
       if (!res.ok) {
@@ -128,10 +129,44 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
 
       const aiData = await res.json();
 
-      // 4. Resolve Category
+      // Handle Invalid Receipts
+      if (aiData.is_valid_receipt === false) {
+        setMessages(prev => [...prev, {
+          id: `ai-${Date.now()}`,
+          sender: 'ai',
+          text: "I couldn't clearly read a receipt in that image. Could you please upload a clearer photo or type the details?",
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]);
+        return;
+      }
+
+      // Handle Queries or General Help
+      if (aiData.intent === 'QUERY_FINANCES' || aiData.intent === 'GENERAL_HELP') {
+        setMessages(prev => [...prev, {
+          id: `ai-${Date.now()}`,
+          sender: 'ai',
+          text: aiData.conversational_response || "I'm here to help you manage your finances!",
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]);
+        return;
+      }
+
+      // Handle Incomplete Expense Logging (Needs Clarification)
+      if (aiData.intent === 'LOG_EXPENSE' && !aiData.is_complete) {
+        setMessages(prev => [...prev, {
+          id: `ai-${Date.now()}`,
+          sender: 'ai',
+          text: aiData.clarification_question || "I need a few more details to log this. What was the amount and vendor?",
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]);
+        return;
+      }
+
+      // 4. Resolve Category for Complete Expense
       let targetCategoryId: string | null = null;
+      const extractedCategory = aiData.expense_data?.category_name;
       const matchedCategory = categories?.find(
-        c => c.name.toLowerCase() === aiData.category_name?.toLowerCase()
+        c => c.name.toLowerCase() === extractedCategory?.toLowerCase()
       );
 
       if (matchedCategory) {
@@ -139,22 +174,22 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
       } else if (categories && categories.length > 0) {
         targetCategoryId = categories[0].id;
       } else {
-        // Auto-create category if missing
         const { data: newCat } = await supabase
           .from('categories')
-          .insert({ name: aiData.category_name || "General Expenses" })
+          .insert({ name: extractedCategory || "General Expenses" })
           .select()
           .single();
         targetCategoryId = newCat?.id || null;
       }
 
-      // 5. Insert Pending Transaction into Supabase Database
+      // 5. Insert Pending Transaction into DB (Edge Case: Duplicate check could be added here later)
+      const exp = aiData.expense_data;
       const { data: insertedTx, error: insertError } = await supabase.from('transactions').insert({
         user_id: user.id,
-        amount: aiData.amount,
-        currency: aiData.currency || 'PKR',
-        date: aiData.date || new Date().toISOString().split('T')[0],
-        vendor_name: aiData.vendor_name || 'Unknown Merchant',
+        amount: exp?.amount || 0,
+        currency: exp?.currency || 'PKR',
+        date: exp?.date || new Date().toISOString().split('T')[0],
+        vendor_name: exp?.vendor_name || 'Unknown Merchant',
         category_id: targetCategoryId,
         is_user_verified: false
       }).select().single();
@@ -167,11 +202,11 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
         sender: 'ai',
         text: `I extracted the expense details and staged it under **Pending Verification**!`,
         extractedDraft: {
-          vendor_name: aiData.vendor_name || 'Unknown Merchant',
-          amount: aiData.amount,
-          currency: aiData.currency || 'PKR',
-          date: aiData.date || new Date().toISOString().split('T')[0],
-          category_name: aiData.category_name || 'General Expenses',
+          vendor_name: exp?.vendor_name || 'Unknown Merchant',
+          amount: exp?.amount || 0,
+          currency: exp?.currency || 'PKR',
+          date: exp?.date || new Date().toISOString().split('T')[0],
+          category_name: extractedCategory || 'General Expenses',
           status: 'pending',
           transactionId: insertedTx?.id
         },
@@ -186,7 +221,7 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
       const errorMsg: ChatMessage = {
         id: `err-${Date.now()}`,
         sender: 'ai',
-        text: `Sorry, I encountered an issue: ${err.message || 'Could not process expense.'}`,
+        text: `Sorry, I encountered an issue: ${err.message || 'Could not process request.'}`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, errorMsg]);
