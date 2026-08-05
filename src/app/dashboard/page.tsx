@@ -61,6 +61,20 @@ export default function DashboardPage() {
     }
   }
 
+  // Real-time Sync for Edge Case 6
+  useEffect(() => {
+    const channel = supabase
+      .channel('public:transactions')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
+        fetchTransactions();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase]);
+
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50">
