@@ -32,6 +32,9 @@ export default function PendingTable({ transactions, categories, onDataChanged }
   }
 
   async function handleDelete(id: string) {
+    if (!window.confirm("Are you sure you want to delete this transaction? This action cannot be undone.")) {
+      return;
+    }
     const { error } = await supabase.from('transactions').delete().eq('id', id);
     if (error) console.error("Delete error:", error);
     onDataChanged();
