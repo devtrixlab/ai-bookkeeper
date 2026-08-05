@@ -22,6 +22,8 @@ export default function DashboardPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
+  const [userId, setUserId] = useState<string | null>(null);
+
   useEffect(() => {
     fetchInitialData();
   }, []);
@@ -31,8 +33,11 @@ export default function DashboardPage() {
     
     // Fetch User
     const { data: { user } } = await supabase.auth.getUser();
+    let currentUserId = null;
     if (user?.email) {
       setUserEmail(user.email);
+      setUserId(user.id);
+      currentUserId = user.id;
     }
 
     // Fetch Categories
@@ -43,14 +48,21 @@ export default function DashboardPage() {
       setCategories(cats);
     }
     
-    await fetchTransactions();
-    setIsLoading(false);
+    if (currentUserId) {
+      await fetchTransactions(currentUserId);
+    } else {
+      setIsLoading(false);
+    }
   }
 
-  async function fetchTransactions() {
+  async function fetchTransactions(uid?: string) {
+    const activeUserId = uid || userId;
+    if (!activeUserId) return;
+
     const { data, error } = await supabase
       .from('transactions')
       .select('*, categories(name)')
+      .eq('user_id', activeUserId)
       .order('created_at', { ascending: false });
     
     if (error) {
@@ -59,13 +71,15 @@ export default function DashboardPage() {
       setPendingTransactions(data.filter(t => !t.is_user_verified));
       setVerifiedTransactions(data.filter(t => t.is_user_verified));
     }
+    setIsLoading(false);
   }
 
   // Real-time Sync for Edge Case 6
   useEffect(() => {
+    if (!userId) return;
     const channel = supabase
-      .channel('public:transactions')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
+      .channel(`public:transactions:${userId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: `user_id=eq.${userId}` }, () => {
         fetchTransactions();
       })
       .subscribe();
@@ -73,7 +87,7 @@ export default function DashboardPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase]);
+  }, [supabase, userId]);
 
   if (isLoading) {
     return (
