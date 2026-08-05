@@ -11,7 +11,8 @@ import TransactionsExplorer from '@/components/dashboard/TransactionsExplorer';
 export default function DashboardPage() {
   const [pendingTransactions, setPendingTransactions] = useState<any[]>([]);
   const [verifiedTransactions, setVerifiedTransactions] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
+  const [chartOfAccounts, setChartOfAccounts] = useState<any[]>([]);
+  const [contacts, setContacts] = useState<any[]>([]);
   const [userEmail, setUserEmail] = useState<string>('user@aibookkeeper.com');
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'ledger' | 'analytics' | 'transactions'>('overview');
@@ -40,12 +41,20 @@ export default function DashboardPage() {
       currentUserId = user.id;
     }
 
-    // Fetch Categories
-    const { data: cats, error: catsError } = await supabase.from('categories').select('*');
-    if (catsError) {
-      console.error("Error fetching categories:", catsError);
-    } else if (cats) {
-      setCategories(cats);
+    // Fetch Accounts
+    const { data: accounts, error: accError } = await supabase.from('chart_of_accounts').select('*');
+    if (accError) {
+      console.error("Error fetching accounts:", accError);
+    } else if (accounts) {
+      setChartOfAccounts(accounts);
+    }
+
+    // Fetch Contacts
+    const { data: contactsData, error: conError } = await supabase.from('contacts').select('*');
+    if (conError) {
+      console.error("Error fetching contacts:", conError);
+    } else if (contactsData) {
+      setContacts(contactsData);
     }
     
     if (currentUserId) {
@@ -61,15 +70,15 @@ export default function DashboardPage() {
 
     const { data, error } = await supabase
       .from('transactions')
-      .select('*, categories(name)')
+      .select('*, contacts(name, type), chart_of_accounts(name, account_type)')
       .eq('user_id', activeUserId)
       .order('created_at', { ascending: false });
     
     if (error) {
       console.error("Error fetching transactions:", error);
     } else if (data) {
-      setPendingTransactions(data.filter(t => !t.is_user_verified));
-      setVerifiedTransactions(data.filter(t => t.is_user_verified));
+      setPendingTransactions(data.filter(t => !t.is_ai_verified));
+      setVerifiedTransactions(data.filter(t => t.is_ai_verified));
     }
     setIsLoading(false);
   }
@@ -124,7 +133,8 @@ export default function DashboardPage() {
                 userEmail={userEmail}
                 pendingTransactions={pendingTransactions}
                 verifiedTransactions={verifiedTransactions}
-                categories={categories}
+                chartOfAccounts={chartOfAccounts}
+                contacts={contacts}
                 onDataChanged={fetchTransactions}
                 activeTab={activeTab}
               />
@@ -138,7 +148,7 @@ export default function DashboardPage() {
           {/* RIGHT SIDEBAR: Conversational AI Assistant Chat (Reference: Green Box & 11.png) */}
           <div className="hidden lg:block lg:col-span-5 xl:col-span-4 h-full sticky top-20">
             <AiChatPanel
-              categories={categories}
+              chartOfAccounts={chartOfAccounts}
               onDataChanged={fetchTransactions}
             />
           </div>
@@ -171,7 +181,7 @@ export default function DashboardPage() {
               </button>
               
               <AiChatPanel
-                categories={categories}
+                chartOfAccounts={chartOfAccounts}
                 onDataChanged={fetchTransactions}
               />
             </div>

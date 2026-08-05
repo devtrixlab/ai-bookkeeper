@@ -13,7 +13,7 @@ import {
   User
 } from 'lucide-react';
 
-type Category = { id: string; name: string; };
+import { ChartOfAccount, ContactType, AccountType, EntryType, PaymentStatus } from '@/types';
 
 interface ChatMessage {
   id: string;
@@ -21,29 +21,32 @@ interface ChatMessage {
   text: string;
   imagePreview?: string | null;
   extractedDraft?: {
-    vendor_name: string;
+    contact_name: string;
+    contact_type: ContactType;
+    account_name: string;
     amount: number;
     currency: string;
-    date: string;
-    category_name: string;
-    status: 'draft' | 'pending' | 'verified';
+    issue_date: string;
+    due_date?: string | null;
+    entry_type: EntryType;
+    status: PaymentStatus;
     transactionId?: string;
   } | null;
   timestamp: string;
 }
 
 interface AiChatPanelProps {
-  categories: Category[];
+  chartOfAccounts: ChartOfAccount[];
   onDataChanged: () => void;
-  onClose?: () => void; // Added for mobile full-screen closing
+  onClose?: () => void;
 }
 
-export default function AiChatPanel({ categories, onDataChanged, onClose }: AiChatPanelProps) {
+export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }: AiChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome-1',
       sender: 'ai',
-      text: 'Hello! I am your AI Forensic Accountant. Upload a receipt image or type an expense (e.g. "I spent 1500 PKR on fuel"), and I will extract and stage it automatically.',
+      text: 'Hello! I am your AI B2B Accountant. Upload a bill, invoice, or type details (e.g. "I owe AWS 1500 PKR for hosting"), and I will extract and stage it automatically.',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
@@ -60,7 +63,6 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  // Auto-scroll chat to bottom when messages update
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isExtracting]);
@@ -71,7 +73,6 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
       return;
     }
     
-    // Size limit check (e.g., 5MB max before attempting resize, or just strict limit)
     if (file.size > 5 * 1024 * 1024) {
       alert("Image is too large. Please upload an image under 5MB.");
       return;
@@ -79,7 +80,6 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
 
     setImageFile(file);
     
-    // Client-side lightweight compression via Canvas
     const reader = new FileReader();
     reader.onloadend = () => {
       const img = new Image();
@@ -107,7 +107,6 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, width, height);
         
-        // Compress to JPEG with 0.8 quality
         const compressedBase64 = canvas.toDataURL('image/jpeg', 0.8);
         setImageBase64(compressedBase64);
       };
@@ -131,7 +130,6 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
     const messageId = `msg-${Date.now()}`;
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    // 1. Append User Message
     const newUserMsg: ChatMessage = {
       id: messageId,
       sender: 'user',
@@ -147,7 +145,6 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
     setIsExtracting(true);
 
     try {
-      // 2. Fetch User Session
       const { data: { session } } = await supabase.auth.getSession();
       const { data: { user } } = await supabase.auth.getUser();
 
@@ -155,7 +152,6 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
         throw new Error("Authentication required. Please sign in.");
       }
 
-      // 3. Call AI Extract Route with History
       const res = await fetch('/api/extract', {
         method: 'POST',
         headers: {
@@ -172,7 +168,6 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
 
       const aiData = await res.json();
 
-      // Handle Invalid Receipts
       if (aiData.is_valid_receipt === false) {
         setMessages(prev => [...prev, {
           id: `ai-${Date.now()}`,
@@ -183,8 +178,7 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
         return;
       }
 
-      // Handle Queries or General Help
-      if (aiData.intent === 'QUERY_FINANCES' || aiData.intent === 'GENERAL_HELP') {
+      if (aiData.intent === 'QUERY_FINANCES' || aiData.intent === 'GENERAL_HELP' || aiData.intent === 'QUERY_AP' || aiData.intent === 'QUERY_AR') {
         setMessages(prev => [...prev, {
           id: `ai-${Date.now()}`,
           sender: 'ai',
@@ -194,46 +188,64 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
         return;
       }
 
-      // Handle Incomplete Expense Logging (Needs Clarification)
-      if (aiData.intent === 'LOG_EXPENSE' && !aiData.is_complete) {
+      if ((aiData.intent === 'LOG_BILL' || aiData.intent === 'LOG_INVOICE') && !aiData.is_complete) {
         setMessages(prev => [...prev, {
           id: `ai-${Date.now()}`,
           sender: 'ai',
-          text: aiData.clarification_question || "I need a few more details to log this. What was the amount and vendor?",
+          text: aiData.clarification_question || "I need a few more details to log this. What was the amount and contact?",
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }]);
         return;
       }
 
-      // 4. Resolve Category for Complete Expense
-      let targetCategoryId: string | null = null;
-      const extractedCategory = aiData.expense_data?.category_name;
-      const matchedCategory = categories?.find(
-        c => c.name.toLowerCase() === extractedCategory?.toLowerCase()
-      );
+      const ext = aiData;
+      let targetContactId = null;
+      let targetAccountId = null;
 
-      if (matchedCategory) {
-        targetCategoryId = matchedCategory.id;
-      } else if (categories && categories.length > 0) {
-        targetCategoryId = categories[0].id;
-      } else {
-        const { data: newCat } = await supabase
-          .from('categories')
-          .insert({ name: extractedCategory || "General Expenses" })
-          .select()
-          .single();
-        targetCategoryId = newCat?.id || null;
+      if (ext.contact_name) {
+        const { data: existingContact } = await supabase
+          .from('contacts')
+          .select('id')
+          .eq('user_id', user.id)
+          .ilike('name', ext.contact_name)
+          .limit(1)
+          .maybeSingle();
+          
+        if (existingContact) {
+          targetContactId = existingContact.id;
+        } else {
+          const { data: newContact } = await supabase
+            .from('contacts')
+            .insert({ user_id: user.id, name: ext.contact_name, type: ext.contact_type || 'vendor' })
+            .select()
+            .single();
+          targetContactId = newContact?.id;
+        }
       }
 
-      // 5. Insert Pending Transaction into DB (Edge Case: Duplicate check)
-      const exp = aiData.expense_data;
-      
+      if (ext.account_name) {
+        const matchedAccount = chartOfAccounts?.find(
+          c => c.name.toLowerCase() === ext.account_name.toLowerCase()
+        );
+        if (matchedAccount) {
+          targetAccountId = matchedAccount.id;
+        } else {
+          const { data: newAccount } = await supabase
+            .from('chart_of_accounts')
+            .insert({ user_id: user.id, name: ext.account_name, account_type: ext.account_type || 'expense' })
+            .select()
+            .single();
+          targetAccountId = newAccount?.id;
+        }
+      }
+
       const { data: existingTx } = await supabase
         .from('transactions')
         .select('id')
-        .eq('amount', exp?.amount || 0)
-        .eq('vendor_name', exp?.vendor_name || 'Unknown Merchant')
-        .eq('date', exp?.date || new Date().toISOString().split('T')[0])
+        .eq('amount', ext.amount || 0)
+        .eq('contact_id', targetContactId)
+        .eq('entry_type', ext.entry_type)
+        .eq('issue_date', ext.issue_date || new Date().toISOString().split('T')[0])
         .eq('user_id', user.id)
         .limit(1)
         .maybeSingle();
@@ -242,7 +254,7 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
         setMessages(prev => [...prev, {
           id: `ai-${Date.now()}`,
           sender: 'ai',
-          text: `⚠️ **Duplicate Detected:** A transaction for ${exp?.amount} ${exp?.currency || 'PKR'} at ${exp?.vendor_name} on ${exp?.date} already exists in your records. I have not logged it again to prevent duplicates.`,
+          text: `⚠️ **Duplicate Detected:** A ${ext.entry_type} for ${ext.amount} with ${ext.contact_name} on ${ext.issue_date} already exists.`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }]);
         setIsExtracting(false);
@@ -251,28 +263,33 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
 
       const { data: insertedTx, error: insertError } = await supabase.from('transactions').insert({
         user_id: user.id,
-        amount: exp?.amount || 0,
-        currency: exp?.currency || 'PKR',
-        date: exp?.date || new Date().toISOString().split('T')[0],
-        vendor_name: exp?.vendor_name || 'Unknown Merchant',
-        category_id: targetCategoryId,
-        is_user_verified: false
+        contact_id: targetContactId,
+        account_id: targetAccountId,
+        amount: ext.amount || 0,
+        entry_type: ext.entry_type || 'debit',
+        status: ext.status || 'unpaid',
+        issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
+        due_date: ext.due_date || null,
+        description: ext.description || null,
+        is_ai_verified: false
       }).select().single();
 
       if (insertError) throw insertError;
 
-      // 6. Append AI Confirmation Response Message with Interactive Card
       const aiResponseMsg: ChatMessage = {
         id: `ai-${Date.now()}`,
         sender: 'ai',
-        text: `I extracted the expense details and staged it under **Pending Verification**!`,
+        text: `I extracted the details and staged it under **Pending Verification**!`,
         extractedDraft: {
-          vendor_name: exp?.vendor_name || 'Unknown Merchant',
-          amount: exp?.amount || 0,
-          currency: exp?.currency || 'PKR',
-          date: exp?.date || new Date().toISOString().split('T')[0],
-          category_name: extractedCategory || 'General Expenses',
-          status: 'pending',
+          contact_name: ext.contact_name || 'Unknown Entity',
+          contact_type: ext.contact_type || 'vendor',
+          account_name: ext.account_name || 'Uncategorized',
+          amount: ext.amount || 0,
+          currency: 'PKR',
+          issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
+          due_date: ext.due_date,
+          entry_type: ext.entry_type || 'debit',
+          status: ext.status || 'unpaid',
           transactionId: insertedTx?.id
         },
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -301,28 +318,26 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
     }
   }
 
-  // Quick verify from inside chat message card
   async function handleVerifyDraft(msgId: string, txId?: string) {
     if (!txId) return;
-    const { error } = await supabase.from('transactions').update({ is_user_verified: true }).eq('id', txId);
+    const { error } = await supabase.from('transactions').update({ is_ai_verified: true }).eq('id', txId);
     if (!error) {
+      onDataChanged();
       setMessages(prev => prev.map(m => {
         if (m.id === msgId && m.extractedDraft) {
           return {
             ...m,
-            extractedDraft: { ...m.extractedDraft, status: 'verified' }
+            text: "✓ Verified and moved to Ledger!",
+            extractedDraft: { ...m.extractedDraft, status: 'paid' }
           };
         }
         return m;
       }));
-      onDataChanged();
     }
   }
 
   return (
     <div className="flex flex-col h-full w-full bg-white md:bg-white/90 backdrop-blur-md md:rounded-2xl border-0 md:border md:border-gray-100 shadow-sm overflow-hidden relative">
-      
-      {/* CHAT HEADER */}
       <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-blue-50/30 flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md shadow-blue-500/20">
@@ -336,11 +351,9 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
             </h3>
-            <p className="text-[11px] text-gray-500 font-medium">Conversational Forensic Accountant</p>
+            <p className="text-[11px] text-gray-500 font-medium">Conversational B2B Engine</p>
           </div>
         </div>
-
-        {/* Mobile Close Button (Displays on phone screens if onClose is provided) */}
         {onClose && (
           <button 
             onClick={onClose}
@@ -351,7 +364,6 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
         )}
       </div>
 
-      {/* CHAT MESSAGES SCROLL AREA */}
       <div className="flex-1 p-4 overflow-y-auto space-y-4">
         {messages.map((msg) => (
           <div
@@ -365,15 +377,12 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
             )}
 
             <div className={`max-w-[85%] space-y-2 ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
-              
-              {/* Image Preview if user uploaded */}
               {msg.imagePreview && (
                 <div className="rounded-xl overflow-hidden border border-gray-200 shadow-xs max-w-xs mb-1">
                   <img src={msg.imagePreview} alt="Uploaded receipt" className="max-h-48 object-cover w-full" />
                 </div>
               )}
 
-              {/* Message Bubble */}
               <div
                 className={`p-3.5 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-2xs ${
                   msg.sender === 'user'
@@ -384,46 +393,52 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
                 {msg.text}
               </div>
 
-              {/* Interactive Extracted Expense Card inside AI Bubble */}
               {msg.extractedDraft && (
                 <div className="bg-white rounded-xl border border-blue-100 p-3.5 shadow-sm space-y-2.5 mt-2 animate-in fade-in duration-200">
                   <div className="flex items-center justify-between border-b border-gray-100 pb-2">
                     <span className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
-                      <Receipt className="w-4 h-4 text-blue-600" />
-                      {msg.extractedDraft.vendor_name}
+                      <Receipt className={`w-4 h-4 ${msg.extractedDraft.entry_type === 'credit' ? 'text-emerald-600' : 'text-red-600'}`} />
+                      {msg.extractedDraft.contact_name} 
+                      <span className="ml-1 text-[10px] text-gray-400 font-normal">({msg.extractedDraft.contact_type})</span>
                     </span>
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                      msg.extractedDraft.status === 'verified'
+                      msg.extractedDraft.status === 'paid'
                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                         : 'bg-amber-50 text-amber-700 border border-amber-200'
                     }`}>
-                      {msg.extractedDraft.status === 'verified' ? '✓ Verified' : 'Pending Verification'}
+                      {msg.extractedDraft.status.toUpperCase()}
                     </span>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div>
                       <span className="text-gray-400 text-[10px]">Amount:</span>
-                      <p className="font-bold text-gray-900">{msg.extractedDraft.amount} {msg.extractedDraft.currency}</p>
+                      <p className={`font-bold ${msg.extractedDraft.entry_type === 'credit' ? 'text-emerald-600' : 'text-gray-900'}`}>
+                        {msg.extractedDraft.entry_type === 'credit' ? '+' : '-'}{msg.extractedDraft.amount} {msg.extractedDraft.currency}
+                      </p>
                     </div>
                     <div>
-                      <span className="text-gray-400 text-[10px]">Date:</span>
-                      <p className="font-medium text-gray-700">{msg.extractedDraft.date}</p>
+                      <span className="text-gray-400 text-[10px]">Issue Date:</span>
+                      <p className="font-medium text-gray-700">{msg.extractedDraft.issue_date}</p>
                     </div>
                     <div className="col-span-2">
-                      <span className="text-gray-400 text-[10px]">Category:</span>
-                      <p className="font-semibold text-blue-600">{msg.extractedDraft.category_name}</p>
+                      <span className="text-gray-400 text-[10px]">Account:</span>
+                      <p className="font-semibold text-blue-600">{msg.extractedDraft.account_name}</p>
                     </div>
+                    {msg.extractedDraft.due_date && (
+                      <div className="col-span-2">
+                        <span className="text-gray-400 text-[10px]">Due Date:</span>
+                        <p className="font-medium text-red-600">{msg.extractedDraft.due_date}</p>
+                      </div>
+                    )}
                   </div>
 
-                  {msg.extractedDraft.status === 'pending' && (
-                    <button
-                      onClick={() => handleVerifyDraft(msg.id, msg.extractedDraft?.transactionId)}
-                      className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Approve & Move to Ledger
-                    </button>
-                  )}
+                  <button
+                    onClick={() => handleVerifyDraft(msg.id, msg.extractedDraft?.transactionId)}
+                    className="w-full py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer mt-2"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Approve into Ledger
+                  </button>
                 </div>
               )}
 
@@ -437,8 +452,6 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
             )}
           </div>
         ))}
-
-        {/* Loading Indicator */}
         {isExtracting && (
           <div className="flex gap-3 items-center text-xs text-blue-600 font-medium">
             <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
@@ -447,14 +460,10 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
             <span>Analyzing receipt & extracting structured financial data...</span>
           </div>
         )}
-
         <div ref={chatBottomRef} />
       </div>
 
-      {/* FIXED-BOTTOM LIGHT-THEMED INPUT BAR */}
       <div className="p-3 bg-white border-t border-gray-100 sticky bottom-0 z-10">
-        
-        {/* Image Attachment Thumbnail Preview */}
         {imageBase64 && (
           <div className="mb-2 relative inline-block">
             <img src={imageBase64} alt="Receipt preview" className="h-16 w-16 object-cover rounded-xl border border-gray-300 shadow-xs" />
@@ -466,11 +475,7 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
             </button>
           </div>
         )}
-
-        {/* Sleek Light Input Bar */}
         <form onSubmit={handleSendMessage} className="relative flex items-center bg-white rounded-full p-1.5 shadow-md pl-3 pr-2 border border-gray-200 transition-shadow focus-within:ring-2 focus-within:ring-blue-100 focus-within:border-blue-300">
-          
-          {/* File Picker Trigger Button (+) */}
           <input
             type="file"
             ref={fileInputRef}
@@ -486,18 +491,14 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
           >
             <Plus className="w-5 h-5" />
           </button>
-
-          {/* Prompt Text Input */}
           <input
             type="text"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder={imageBase64 ? "Add details (optional)..." : "Ask or log expense..."}
+            placeholder={imageBase64 ? "Add details (optional)..." : "Ask or log bill/invoice..."}
             className="flex-1 bg-transparent border-none text-gray-900 text-xs sm:text-sm px-3 focus:outline-none placeholder:text-gray-400"
             disabled={isExtracting}
           />
-
-          {/* Circular Primary Send Button */}
           <button
             type="submit"
             disabled={isExtracting || (!prompt.trim() && !imageBase64)}
@@ -510,7 +511,6 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
             )}
           </button>
         </form>
-
       </div>
     </div>
   );

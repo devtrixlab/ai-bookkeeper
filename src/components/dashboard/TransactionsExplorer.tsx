@@ -12,14 +12,11 @@ import {
 } from 'lucide-react';
 
 interface Transaction {
-  id: string;
-  amount: number;
-  currency: string;
-  date: string;
-  vendor_name: string;
-  category_id: string;
-  is_user_verified: boolean;
-  categories: { name: string };
+  id: string; amount: number; issue_date: string; contact_id: string; account_id: string;
+  is_ai_verified: boolean; status: 'paid' | 'unpaid' | 'partial'; entry_type: 'credit' | 'debit';
+  description: string;
+  contacts?: { name: string, type: string };
+  chart_of_accounts?: { name: string, account_type: string };
 }
 
 interface TransactionsExplorerProps {
@@ -29,20 +26,22 @@ interface TransactionsExplorerProps {
 export default function TransactionsExplorer({ transactions }: TransactionsExplorerProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'verified' | 'pending'>('all');
-  const [sortConfig, setSortConfig] = useState<{ key: keyof Transaction | 'category'; direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState<{ key: keyof Transaction | 'account' | 'contact'; direction: 'asc' | 'desc' }>({ key: 'issue_date', direction: 'desc' });
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
   // Filter & Search Logic
   const filteredData = useMemo(() => {
     return transactions.filter(t => {
-      const matchesSearch = t.vendor_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                            t.categories?.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const contactName = t.contacts?.name || '';
+      const accountName = t.chart_of_accounts?.name || '';
+      const matchesSearch = contactName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            accountName.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStatus = statusFilter === 'all' 
                             ? true 
                             : statusFilter === 'verified' 
-                              ? t.is_user_verified 
-                              : !t.is_user_verified;
+                              ? t.is_ai_verified 
+                              : !t.is_ai_verified;
       return matchesSearch && matchesStatus;
     });
   }, [transactions, searchTerm, statusFilter]);
@@ -51,18 +50,28 @@ export default function TransactionsExplorer({ transactions }: TransactionsExplo
   const sortedData = useMemo(() => {
     let sortableItems = [...filteredData];
     sortableItems.sort((a, b) => {
-      if (sortConfig.key === 'category') {
-        const catA = a.categories?.name || '';
-        const catB = b.categories?.name || '';
+      if (sortConfig.key === 'account') {
+        const catA = a.chart_of_accounts?.name || '';
+        const catB = b.chart_of_accounts?.name || '';
         if (catA < catB) return sortConfig.direction === 'asc' ? -1 : 1;
         if (catA > catB) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;
       }
+      if (sortConfig.key === 'contact') {
+        const conA = a.contacts?.name || '';
+        const conB = b.contacts?.name || '';
+        if (conA < conB) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (conA > conB) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      }
 
-      if (a[sortConfig.key] < b[sortConfig.key]) {
+      const valA = a[sortConfig.key as keyof Transaction] || '';
+      const valB = b[sortConfig.key as keyof Transaction] || '';
+
+      if (valA < valB) {
         return sortConfig.direction === 'asc' ? -1 : 1;
       }
-      if (a[sortConfig.key] > b[sortConfig.key]) {
+      if (valA > valB) {
         return sortConfig.direction === 'asc' ? 1 : -1;
       }
       return 0;
@@ -74,7 +83,7 @@ export default function TransactionsExplorer({ transactions }: TransactionsExplo
   const totalPages = Math.ceil(sortedData.length / itemsPerPage);
   const currentData = sortedData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-  function handleSort(key: keyof Transaction | 'category') {
+  function handleSort(key: keyof Transaction | 'account' | 'contact') {
     setSortConfig(current => ({
       key,
       direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
@@ -102,7 +111,7 @@ export default function TransactionsExplorer({ transactions }: TransactionsExplo
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input 
               type="text" 
-              placeholder="Search vendor or category..." 
+              placeholder="Search contact or account..." 
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
               className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
@@ -138,19 +147,24 @@ export default function TransactionsExplorer({ transactions }: TransactionsExplo
         <table className="w-full text-left text-sm whitespace-nowrap">
           <thead className="bg-gray-50/80 text-gray-500 font-medium border-b border-gray-100">
             <tr>
-              <th className="px-6 py-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('date')}>
+              <th className="px-6 py-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('issue_date')}>
                 <div className="flex items-center gap-1">Date <ArrowUpDown className="w-3 h-3" /></div>
               </th>
-              <th className="px-6 py-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('vendor_name')}>
-                <div className="flex items-center gap-1">Vendor <ArrowUpDown className="w-3 h-3" /></div>
+              <th className="px-6 py-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('contact')}>
+                <div className="flex items-center gap-1">Contact <ArrowUpDown className="w-3 h-3" /></div>
               </th>
-              <th className="px-6 py-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('category')}>
-                <div className="flex items-center gap-1">Category <ArrowUpDown className="w-3 h-3" /></div>
+              <th className="px-6 py-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('account')}>
+                <div className="flex items-center gap-1">Account <ArrowUpDown className="w-3 h-3" /></div>
               </th>
-              <th className="px-6 py-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('amount')}>
-                <div className="flex items-center gap-1">Amount <ArrowUpDown className="w-3 h-3" /></div>
+              <th className="px-6 py-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('entry_type')}>
+                <div className="flex items-center gap-1">Type <ArrowUpDown className="w-3 h-3" /></div>
               </th>
-              <th className="px-6 py-3">Status</th>
+              <th className="px-6 py-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort('status')}>
+                <div className="flex items-center gap-1">Status <ArrowUpDown className="w-3 h-3" /></div>
+              </th>
+              <th className="px-6 py-3 cursor-pointer hover:bg-gray-100 text-right" onClick={() => handleSort('amount')}>
+                <div className="flex items-center justify-end gap-1">Amount <ArrowUpDown className="w-3 h-3" /></div>
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
@@ -159,27 +173,26 @@ export default function TransactionsExplorer({ transactions }: TransactionsExplo
                 <tr key={tx.id} className="hover:bg-blue-50/30 transition-colors">
                   <td className="px-6 py-3.5 text-gray-500 flex items-center gap-2">
                     <Calendar className="w-3.5 h-3.5" />
-                    {tx.date}
+                    {tx.issue_date}
                   </td>
-                  <td className="px-6 py-3.5 font-medium text-gray-900">{tx.vendor_name}</td>
+                  <td className="px-6 py-3.5 font-medium text-gray-900">{tx.contacts?.name || 'Unknown Contact'}</td>
                   <td className="px-6 py-3.5">
                     <span className="px-2.5 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
-                      {tx.categories?.name || 'Uncategorized'}
+                      {tx.chart_of_accounts?.name || 'Uncategorized'}
                     </span>
                   </td>
-                  <td className="px-6 py-3.5 font-bold text-gray-900">
-                    {tx.amount.toLocaleString()} <span className="text-gray-400 font-medium text-xs">{tx.currency}</span>
+                  <td className="px-6 py-3.5">
+                    <span className={`px-2 py-1 rounded-md text-xs font-medium ${tx.entry_type === 'credit' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                      {tx.entry_type === 'credit' ? 'Invoice/AR' : 'Bill/AP'}
+                    </span>
                   </td>
                   <td className="px-6 py-3.5">
-                    {tx.is_user_verified ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Verified
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-600">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Pending
-                      </span>
-                    )}
+                    <span className={`px-2 py-1 rounded-md text-xs font-medium ${tx.status === 'paid' ? 'bg-emerald-50 text-emerald-700' : tx.status === 'partial' ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-700'}`}>
+                      {tx.status}
+                    </span>
+                  </td>
+                  <td className="px-6 py-3.5 font-bold text-gray-900 text-right">
+                    {tx.amount.toLocaleString()}
                   </td>
                 </tr>
               ))

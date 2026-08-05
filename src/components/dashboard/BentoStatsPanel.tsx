@@ -29,23 +29,22 @@ import PendingTable from './PendingTable';
 import VerifiedLedger from './VerifiedLedger';
 
 type Transaction = {
-  id: string;
-  amount: number;
-  currency: string;
-  date: string;
-  vendor_name: string;
-  category_id: string;
-  is_user_verified: boolean;
-  categories: { name: string };
+  id: string; amount: number; issue_date: string; contact_id: string; account_id: string;
+  is_ai_verified: boolean; status: 'paid' | 'unpaid' | 'partial'; entry_type: 'credit' | 'debit';
+  description: string;
+  contacts?: { name: string, type: string };
+  chart_of_accounts?: { name: string, account_type: string };
 };
 
-type Category = { id: string; name: string; };
+type ChartOfAccount = { id: string; name: string; account_type: string };
+type Contact = { id: string; name: string; type: string };
 
 interface BentoStatsPanelProps {
   userEmail?: string;
   pendingTransactions: Transaction[];
   verifiedTransactions: Transaction[];
-  categories: Category[];
+  chartOfAccounts: ChartOfAccount[];
+  contacts: Contact[];
   onDataChanged: () => void;
   activeTab: 'overview' | 'ledger' | 'analytics';
 }
@@ -56,32 +55,37 @@ export default function BentoStatsPanel({
   userEmail = 'user@aibookkeeper.com',
   pendingTransactions,
   verifiedTransactions,
-  categories,
+  chartOfAccounts,
+  contacts,
   onDataChanged,
   activeTab
 }: BentoStatsPanelProps) {
   const [timeRange, setTimeRange] = useState<'Daily' | 'Monthly'>('Monthly');
 
   // Compute metrics
-  const totalVerifiedSpend = useMemo(() => {
-    return verifiedTransactions.reduce((sum, t) => sum + (t.amount || 0), 0);
+  const totalRevenue = useMemo(() => {
+    return verifiedTransactions.filter(t => t.entry_type === 'credit').reduce((sum, t) => sum + (t.amount || 0), 0);
   }, [verifiedTransactions]);
 
-  const primaryCurrency = verifiedTransactions.length > 0 ? verifiedTransactions[0].currency : 'PKR';
+  const totalExpenses = useMemo(() => {
+    return verifiedTransactions.filter(t => t.entry_type === 'debit').reduce((sum, t) => sum + (t.amount || 0), 0);
+  }, [verifiedTransactions]);
+
+  const primaryCurrency = 'PKR';
 
   // Format data for Spend Distribution Donut Chart
   const categoryChartData = useMemo(() => {
     const map = new Map<string, number>();
     verifiedTransactions.forEach(t => {
-      const catName = t.categories?.name || 'Uncategorized';
+      const catName = t.chart_of_accounts?.name || 'Uncategorized';
       map.set(catName, (map.get(catName) || 0) + t.amount);
     });
 
     const items = Array.from(map.entries()).map(([name, value]) => ({ name, value }));
     return items.length > 0 ? items : [
-      { name: 'Meals & Dining', value: 4200 },
-      { name: 'Shopping', value: 2800 },
-      { name: 'Utilities', value: 1900 },
+      { name: 'Services', value: 4200 },
+      { name: 'Software', value: 2800 },
+      { name: 'Office', value: 1900 },
       { name: 'Travel', value: 1100 }
     ];
   }, [verifiedTransactions]);
@@ -90,26 +94,29 @@ export default function BentoStatsPanel({
   const trendData = useMemo(() => {
     if (verifiedTransactions.length === 0) {
       return [
-        { name: 'Mon', spend: 1200, active: 800 },
-        { name: 'Tue', spend: 2100, active: 1500 },
-        { name: 'Wed', spend: 1800, active: 2200 },
-        { name: 'Thu', spend: 3400, active: 1900 },
-        { name: 'Fri', spend: 2900, active: 3100 },
-        { name: 'Sat', spend: 4100, active: 2800 },
-        { name: 'Sun', spend: 3800, active: 3600 },
+        { name: 'Mon', revenue: 1200, expenses: 800 },
+        { name: 'Tue', revenue: 2100, expenses: 1500 },
+        { name: 'Wed', revenue: 1800, expenses: 2200 },
+        { name: 'Thu', revenue: 3400, expenses: 1900 },
+        { name: 'Fri', revenue: 2900, expenses: 3100 },
+        { name: 'Sat', revenue: 4100, expenses: 2800 },
+        { name: 'Sun', revenue: 3800, expenses: 3600 },
       ];
     }
 
     // Group transactions by date
-    const dateMap = new Map<string, number>();
+    const dateMap = new Map<string, { revenue: number, expenses: number }>();
     verifiedTransactions.forEach(t => {
-      dateMap.set(t.date, (dateMap.get(t.date) || 0) + t.amount);
+      const existing = dateMap.get(t.issue_date) || { revenue: 0, expenses: 0 };
+      if (t.entry_type === 'credit') existing.revenue += t.amount;
+      if (t.entry_type === 'debit') existing.expenses += t.amount;
+      dateMap.set(t.issue_date, existing);
     });
 
-    return Array.from(dateMap.entries()).slice(0, 7).map(([date, spend]) => ({
+    return Array.from(dateMap.entries()).slice(0, 7).map(([date, data]) => ({
       name: date.split('-').slice(1).join('/'),
-      spend,
-      active: Math.round(spend * 0.7)
+      revenue: data.revenue,
+      expenses: data.expenses
     }));
   }, [verifiedTransactions]);
 
@@ -159,10 +166,10 @@ export default function BentoStatsPanel({
               </div>
 
               <div className="mt-4">
-                <span className="text-xs font-medium text-gray-500">Total Spend</span>
+                <span className="text-xs font-medium text-gray-500">Total Revenue (AR)</span>
                 <div className="flex items-baseline gap-2 mt-1">
                   <span className="text-2xl font-black text-gray-900">
-                    {totalVerifiedSpend.toLocaleString()} {primaryCurrency}
+                    {totalRevenue.toLocaleString()} {primaryCurrency}
                   </span>
                   <span className="text-xs font-semibold text-emerald-600 flex items-center gap-0.5">
                     <TrendingUp className="w-3 h-3" /> +12%
@@ -170,7 +177,7 @@ export default function BentoStatsPanel({
                 </div>
               </div>
               <p className="text-[11px] text-gray-400 mt-3 flex items-center gap-1">
-                <span>∞ Dynamic of committed changes</span>
+                <span>Invoices & Credits</span>
                 <span className="ml-auto font-medium text-gray-500">Monthly</span>
               </p>
             </div>
@@ -215,10 +222,10 @@ export default function BentoStatsPanel({
               </div>
 
               <div className="mt-4">
-                <span className="text-xs font-medium text-gray-500">Committed Ledger Entries</span>
+                <span className="text-xs font-medium text-gray-500">Total Expenses (AP)</span>
                 <div className="flex items-baseline gap-2 mt-1">
                   <span className="text-2xl font-black text-gray-900">
-                    {verifiedTransactions.length}
+                    {totalExpenses.toLocaleString()} {primaryCurrency}
                   </span>
                   <span className="text-xs font-semibold text-emerald-600 flex items-center gap-0.5">
                     <CheckCircle className="w-3 h-3" /> 100% Verified
@@ -226,7 +233,7 @@ export default function BentoStatsPanel({
                 </div>
               </div>
               <p className="text-[11px] text-gray-400 mt-3 flex items-center gap-1">
-                <span>Active Categories: {categories.length}</span>
+                <span>Bills & Debits</span>
                 <span className="ml-auto font-medium text-emerald-600">Committed</span>
               </p>
             </div>
@@ -242,9 +249,9 @@ export default function BentoStatsPanel({
                 <div>
                   <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
                     <PieIcon className="w-4 h-4 text-blue-600" />
-                    Spend Breakdown by Category
+                    Ledger Breakdown by Account
                   </h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Distribution of committed expenses</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Distribution of committed records</p>
                 </div>
               </div>
 
@@ -271,7 +278,7 @@ export default function BentoStatsPanel({
 
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                   <span className="text-xl font-extrabold text-gray-900">{categoryChartData.length}</span>
-                  <span className="text-[10px] text-gray-400 uppercase font-semibold">Categories</span>
+                  <span className="text-[10px] text-gray-400 uppercase font-semibold">Accounts</span>
                 </div>
               </div>
 
@@ -296,7 +303,7 @@ export default function BentoStatsPanel({
                 <div>
                   <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
                     <BarChart2 className="w-4 h-4 text-purple-600" />
-                    Spending Trend Timeline
+                    AR vs AP Timeline
                   </h3>
                   <p className="text-xs text-gray-400 mt-0.5">Track daily and weekly expenditure curves</p>
                 </div>
@@ -335,8 +342,8 @@ export default function BentoStatsPanel({
                     <XAxis dataKey="name" stroke="#9CA3AF" fontSize={11} tickLine={false} />
                     <YAxis stroke="#9CA3AF" fontSize={11} tickLine={false} axisLine={false} />
                     <Tooltip />
-                    <Area type="monotone" dataKey="spend" stroke="#3B82F6" strokeWidth={3} fillOpacity={1} fill="url(#colorSpend)" />
-                    <Area type="monotone" dataKey="active" stroke="#EC4899" strokeWidth={2} strokeDasharray="3 3" fillOpacity={1} fill="url(#colorActive)" />
+                    <Area type="monotone" dataKey="revenue" stroke="#3B82F6" strokeWidth={3} fillOpacity={1} fill="url(#colorSpend)" />
+                    <Area type="monotone" dataKey="expenses" stroke="#EC4899" strokeWidth={2} strokeDasharray="3 3" fillOpacity={1} fill="url(#colorActive)" />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -348,7 +355,8 @@ export default function BentoStatsPanel({
           <div className="space-y-6">
             <PendingTable 
               transactions={pendingTransactions} 
-              categories={categories} 
+              chartOfAccounts={chartOfAccounts} 
+              contacts={contacts}
               onDataChanged={onDataChanged} 
             />
 
@@ -364,7 +372,7 @@ export default function BentoStatsPanel({
       {activeTab === 'ledger' && (
         <div className="space-y-6">
           <VerifiedLedger transactions={verifiedTransactions} />
-          <PendingTable transactions={pendingTransactions} categories={categories} onDataChanged={onDataChanged} />
+          <PendingTable transactions={pendingTransactions} chartOfAccounts={chartOfAccounts} contacts={contacts} onDataChanged={onDataChanged} />
         </div>
       )}
 
@@ -378,19 +386,19 @@ export default function BentoStatsPanel({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="p-4 rounded-xl bg-gray-50 border border-gray-100">
-              <span className="text-xs font-bold text-gray-700">Category Allocations</span>
+              <span className="text-xs font-bold text-gray-700">Account Allocations</span>
               <div className="mt-3 space-y-3">
                 {categoryChartData.map((c, i) => (
                   <div key={c.name} className="space-y-1">
                     <div className="flex justify-between text-xs font-semibold text-gray-700">
                       <span>{c.name}</span>
-                      <span>{c.value} {primaryCurrency}</span>
+                      <span>{c.value.toLocaleString()} {primaryCurrency}</span>
                     </div>
                     <div className="w-full bg-gray-200 h-2 rounded-full overflow-hidden">
                       <div 
                         className="h-full rounded-full transition-all" 
                         style={{ 
-                          width: `${Math.min(100, (c.value / (totalVerifiedSpend || 1)) * 100)}%`,
+                          width: `${Math.min(100, (c.value / (totalExpenses || 1)) * 100)}%`,
                           backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length]
                         }} 
                       />
