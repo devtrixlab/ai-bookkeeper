@@ -240,10 +240,16 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
 
     } catch (err: any) {
       console.error("Chat Extraction Error:", err);
+      let errorText = `Sorry, I encountered an issue: ${err.message || 'Could not process request.'}`;
+      
+      if (err.message?.includes('Unauthorized') || err.message?.includes('Authentication required')) {
+        errorText = `⚠️ **Session Expired:** Your secure session has timed out. Please refresh the page or [click here to sign in again](/login) to continue.`;
+      }
+
       const errorMsg: ChatMessage = {
         id: `err-${Date.now()}`,
         sender: 'ai',
-        text: `Sorry, I encountered an issue: ${err.message || 'Could not process request.'}`,
+        text: errorText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, errorMsg]);
