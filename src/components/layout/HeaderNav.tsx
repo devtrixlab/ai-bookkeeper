@@ -19,8 +19,8 @@ import {
 } from 'lucide-react';
 
 interface HeaderNavProps {
-  activeTab: 'overview' | 'ledger' | 'analytics';
-  setActiveTab: (tab: 'overview' | 'ledger' | 'analytics') => void;
+  activeTab: 'overview' | 'ledger' | 'analytics' | 'transactions';
+  setActiveTab: (tab: 'overview' | 'ledger' | 'analytics' | 'transactions') => void;
   userEmail?: string;
   pendingCount?: number;
 }
@@ -110,6 +110,18 @@ export default function HeaderNav({
             >
               <BarChart3 className="w-4 h-4 text-purple-600" />
               <span>Analytics</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('transactions')}
+              className={`flex items-center gap-2 px-5 py-1.5 rounded-full text-sm font-medium transition-all cursor-pointer ${
+                activeTab === 'transactions'
+                  ? 'bg-white text-gray-900 shadow-sm border border-gray-200/80 font-semibold'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              }`}
+            >
+              <Receipt className="w-4 h-4 text-indigo-600" />
+              <span>Transactions</span>
             </button>
           </nav>
 
@@ -252,6 +264,15 @@ export default function HeaderNav({
             }`}
           >
             <BarChart3 className="w-5 h-5 text-purple-600" /> Analytics & Reports
+          </button>
+
+          <button
+            onClick={() => { setActiveTab('transactions'); setMobileMenuOpen(false); }}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium ${
+              activeTab === 'transactions' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <Receipt className="w-5 h-5 text-indigo-600" /> Data Explorer
           </button>
         </div>
       )}

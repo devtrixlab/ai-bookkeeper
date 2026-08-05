@@ -6,6 +6,7 @@ import { Loader2, MessageSquare, X } from 'lucide-react';
 import HeaderNav from '@/components/layout/HeaderNav';
 import BentoStatsPanel from '@/components/dashboard/BentoStatsPanel';
 import AiChatPanel from '@/components/chat/AiChatPanel';
+import TransactionsExplorer from '@/components/dashboard/TransactionsExplorer';
 
 export default function DashboardPage() {
   const [pendingTransactions, setPendingTransactions] = useState<any[]>([]);
@@ -13,7 +14,7 @@ export default function DashboardPage() {
   const [categories, setCategories] = useState<any[]>([]);
   const [userEmail, setUserEmail] = useState<string>('user@aibookkeeper.com');
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'ledger' | 'analytics'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'ledger' | 'analytics' | 'transactions'>('overview');
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
 
   const supabase = createBrowserClient(
@@ -90,14 +91,20 @@ export default function DashboardPage() {
           
           {/* LEFT CONTENT AREA: Bento Box Stats & Charts (Reference: Black Box & 22.png) */}
           <div className="lg:col-span-7 xl:col-span-8 overflow-y-auto pr-1 h-full space-y-6 scrollbar-thin">
-            <BentoStatsPanel
-              userEmail={userEmail}
-              pendingTransactions={pendingTransactions}
-              verifiedTransactions={verifiedTransactions}
-              categories={categories}
-              onDataChanged={fetchTransactions}
-              activeTab={activeTab}
-            />
+            {activeTab !== 'transactions' ? (
+              <BentoStatsPanel
+                userEmail={userEmail}
+                pendingTransactions={pendingTransactions}
+                verifiedTransactions={verifiedTransactions}
+                categories={categories}
+                onDataChanged={fetchTransactions}
+                activeTab={activeTab}
+              />
+            ) : (
+              <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <TransactionsExplorer transactions={[...pendingTransactions, ...verifiedTransactions]} />
+              </div>
+            )}
           </div>
 
           {/* RIGHT SIDEBAR: Conversational AI Assistant Chat (Reference: Green Box & 11.png) */}
