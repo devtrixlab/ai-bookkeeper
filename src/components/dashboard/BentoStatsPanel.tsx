@@ -74,6 +74,7 @@ export default function BentoStatsPanel({
   const primaryCurrency = 'PKR';
 
   // Format data for Spend Distribution Donut Chart
+  // Format data for Spend Distribution Donut Chart
   const categoryChartData = useMemo(() => {
     const map = new Map<string, number>();
     verifiedTransactions.forEach(t => {
@@ -81,27 +82,15 @@ export default function BentoStatsPanel({
       map.set(catName, (map.get(catName) || 0) + t.amount);
     });
 
-    const items = Array.from(map.entries()).map(([name, value]) => ({ name, value }));
-    return items.length > 0 ? items : [
-      { name: 'Services', value: 4200 },
-      { name: 'Software', value: 2800 },
-      { name: 'Office', value: 1900 },
-      { name: 'Travel', value: 1100 }
-    ];
+    // Return the actual calculated array, even if it's empty
+    return Array.from(map.entries()).map(([name, value]) => ({ name, value }));
   }, [verifiedTransactions]);
 
   // Format data for Spend Trend Area Chart
   const trendData = useMemo(() => {
+    // Return an empty array if there is no data
     if (verifiedTransactions.length === 0) {
-      return [
-        { name: 'Mon', revenue: 1200, expenses: 800 },
-        { name: 'Tue', revenue: 2100, expenses: 1500 },
-        { name: 'Wed', revenue: 1800, expenses: 2200 },
-        { name: 'Thu', revenue: 3400, expenses: 1900 },
-        { name: 'Fri', revenue: 2900, expenses: 3100 },
-        { name: 'Sat', revenue: 4100, expenses: 2800 },
-        { name: 'Sun', revenue: 3800, expenses: 3600 },
-      ];
+      return []; 
     }
 
     // Group transactions by date
