@@ -72,7 +72,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50/50 flex flex-col font-sans">
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
       
       {/* GLOBAL HEADER (Reference: Red Box in Untitled.png) */}
       <HeaderNav 
