@@ -182,8 +182,30 @@ export default function AiChatPanel({ categories, onDataChanged, onClose }: AiCh
         targetCategoryId = newCat?.id || null;
       }
 
-      // 5. Insert Pending Transaction into DB (Edge Case: Duplicate check could be added here later)
+      // 5. Insert Pending Transaction into DB (Edge Case: Duplicate check)
       const exp = aiData.expense_data;
+      
+      const { data: existingTx } = await supabase
+        .from('transactions')
+        .select('id')
+        .eq('amount', exp?.amount || 0)
+        .eq('vendor_name', exp?.vendor_name || 'Unknown Merchant')
+        .eq('date', exp?.date || new Date().toISOString().split('T')[0])
+        .eq('user_id', user.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingTx) {
+        setMessages(prev => [...prev, {
+          id: `ai-${Date.now()}`,
+          sender: 'ai',
+          text: `⚠️ **Duplicate Detected:** A transaction for ${exp?.amount} ${exp?.currency || 'PKR'} at ${exp?.vendor_name} on ${exp?.date} already exists in your records. I have not logged it again to prevent duplicates.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]);
+        setIsExtracting(false);
+        return;
+      }
+
       const { data: insertedTx, error: insertError } = await supabase.from('transactions').insert({
         user_id: user.id,
         amount: exp?.amount || 0,
