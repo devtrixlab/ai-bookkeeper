@@ -195,7 +195,7 @@ export async function POST(request: Request) {
     return NextResponse.json(structuredData, { status: 200 });
 
   } catch (error) {
-    console.error("Extraction Error:", error);
+    console.error("AI PARSING ERROR:", error);
     return NextResponse.json(
       { error: "Failed to process the receipt data." },
       { status: 500 }

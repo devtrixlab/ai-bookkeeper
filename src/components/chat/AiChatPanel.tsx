@@ -344,7 +344,7 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-white md:bg-white/90 backdrop-blur-md md:rounded-2xl border-0 md:border md:border-gray-100 shadow-sm overflow-hidden relative">
+    <div className="flex flex-col h-[85vh] md:h-[80vh] w-full bg-white md:bg-white/90 backdrop-blur-md md:rounded-2xl border-0 md:border md:border-gray-100 shadow-sm overflow-hidden relative">
       <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-blue-50/30 flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md shadow-blue-500/20">
@@ -360,7 +360,7 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
         )}
       </div>
 
-      <div className="flex-1 p-4 overflow-y-auto min-h-0 space-y-4">
+      <div className="flex-1 p-4 overflow-y-auto min-h-0 flex flex-col space-y-4">
         {messages.map((msg) => (
           <div key={msg.id} className={`flex gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
             {msg.sender === 'ai' && <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0 mt-1">AI</div>}
