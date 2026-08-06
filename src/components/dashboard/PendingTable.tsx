@@ -36,6 +36,14 @@ export default function PendingTable({ items, onDataChanged, onViewLog }: Pendin
   async function handleDelete(id: string, type: 'invoice' | 'bill') {
     if (!window.confirm("Are you sure you want to delete this draft?")) return;
     const table = type === 'invoice' ? 'invoices' : 'bills';
+
+    // Fetch receipt_url first to clean up storage
+    const { data: record } = await supabase.from(table).select('receipt_url').eq('id', id).single();
+    if (record?.receipt_url) {
+      const fileName = record.receipt_url.split('/receipts/')[1];
+      if (fileName) await supabase.storage.from('receipts').remove([fileName]);
+    }
+
     const { error } = await supabase.from(table).delete().eq('id', id);
     if (error) console.error("Delete error:", error);
     onDataChanged();

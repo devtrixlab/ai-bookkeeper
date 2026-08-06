@@ -181,7 +181,11 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
       // Ensure Account exists
       let targetAccountId = null;
       if (ext.account_name) {
-        const matchedAccount = chartOfAccounts?.find(c => c.name.toLowerCase() === ext.account_name.toLowerCase());
+        const extAccLower = ext.account_name.toLowerCase();
+        const matchedAccount = chartOfAccounts?.find(c => {
+          const cNameLower = c.name.toLowerCase();
+          return cNameLower === extAccLower || cNameLower.includes(extAccLower) || extAccLower.includes(cNameLower);
+        });
         if (matchedAccount) targetAccountId = matchedAccount.id;
         else {
           const accType = ext.intent === 'LOG_BILL' ? 'expense' : 'revenue';
@@ -270,28 +274,20 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
         }
 
         // Insert Invoice Line
-        if (productId) {
-          await supabase.from('invoice_lines').insert({
-            invoice_id: insertedId,
-            product_id: productId,
-            quantity: 1,
-            unit_price: ext.amount || 0,
-            total: ext.amount || 0
-          });
+        if (!productId) {
+          throw new Error('Could not resolve or create product. Invoice line aborted.');
         }
-      }
-
-      // Record Audit Log
-      if (insertedId) {
-        await supabase.from('ai_chat_logs').insert({
-          user_id: user.id,
-          reference_type: ext.intent === 'LOG_BILL' ? 'bill' : 'invoice',
-          reference_id: insertedId,
-          transcript: updatedMessages
+        await supabase.from('invoice_lines').insert({
+          invoice_id: insertedId,
+          product_id: productId,
+          description: ext.description || ext.product_name,
+          quantity: 1,
+          unit_price: ext.amount || 0,
+          total: ext.amount || 0
         });
       }
 
-      setMessages(prev => [...prev, {
+      const finalAiMessage: ChatMessage = {
         id: `ai-${Date.now()}`,
         sender: 'ai',
         text: `I successfully extracted the details and staged the ${ext.intent === 'LOG_BILL' ? 'Bill' : 'Invoice'}! Please verify to push it to the Ledger.`,
@@ -306,7 +302,21 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
           transactionId: insertedId
         },
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      }]);
+      };
+
+      const completeTranscript = [...updatedMessages, finalAiMessage];
+
+      // Record Audit Log
+      if (insertedId) {
+        await supabase.from('ai_chat_logs').insert({
+          user_id: user.id,
+          reference_type: ext.intent === 'LOG_BILL' ? 'bill' : 'invoice',
+          reference_id: insertedId,
+          transcript: completeTranscript
+        });
+      }
+
+      setMessages(completeTranscript);
       onDataChanged();
 
     } catch (err: any) {
@@ -398,6 +408,12 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
                       <span className="text-gray-400 text-[10px]">Issue Date:</span>
                       <p className="font-medium text-gray-700">{msg.extractedDraft.issue_date}</p>
                     </div>
+                    {msg.extractedDraft.due_date && (
+                      <div>
+                        <span className="text-gray-400 text-[10px]">Due Date:</span>
+                        <p className="font-medium text-red-600">{msg.extractedDraft.due_date}</p>
+                      </div>
+                    )}
                     <div className="col-span-2">
                       <span className="text-gray-400 text-[10px]">Account:</span>
                       <p className="font-semibold text-blue-600">{msg.extractedDraft.account_name}</p>
