@@ -89,26 +89,31 @@ export async function POST(request: Request) {
     - GENERAL_HELP: General chat or usage help.
     
     RULES FOR EXTRACTION:
-    1. If critical fields (amount, customer/supplier name) are missing, DO NOT guess them. Set "is_complete": false and ask a conversational "clarification_question".
-    2. Use 'supplier_name' for bills and payments made. Use 'customer_name' for invoices and payments received.
-    3. Determine if the transaction is fully paid ("status": "paid") or just an open invoice/bill ("status": "open").
-    4. You MUST extract what was actually bought/sold and place it in the "product_name" or "description" field. Never leave it blank if goods/services are mentioned.
-    5. CRITICAL ACCOUNT MAPPING: You MUST map the transaction's account_name to exactly one of these existing accounts: [${accountNames}]. Choose the one that best fits. If none fit perfectly, pick the closest match (e.g. 'General Expenses' for random bills, 'Sales Revenue' for invoices).
-    6. DATES: Today's date is ${today}. If the user says "yesterday" or "today" or a day of the week, calculate the exact YYYY-MM-DD based on today. If no date is given, default to ${today}.
+    1. Multi-Line Item Extraction: A single receipt/invoice can contain multiple items. You MUST return an array of line items in "line_items". For each item, extract its "description", "quantity", "unit_price", and "total". Never summarize them into a single line.
+    2. Missing Data: If critical fields (total_amount, line_items, customer/supplier name) are missing, DO NOT guess them. Set "is_complete": false and ask a conversational "clarification_question".
+    3. Entity Resolution: Extract the exact legal name of the vendor or client into 'supplier_name' (for bills/payments made) or 'customer_name' (for invoices/payments received), separating it from the line items.
+    4. Chart of Accounts Grounding: You MUST categorize each line item using ONLY the exact account names provided: [${accountNames}]. You must place the exact account name in the "account_name" field of each line item. Do not hallucinate non-existent accounting categories. If none fit perfectly, pick the closest match.
+    5. Dates: Today's date is ${today}. If the user says "yesterday" or "today" or a day of the week, calculate the exact YYYY-MM-DD based on today. The "issue_date" and "due_date" MUST be in strict YYYY-MM-DD format. If no issue_date is given, default to ${today}.
     
     OUTPUT FORMAT:
-    You must respond ONLY with a raw JSON object matching this schema. Do not include markdown formatting or backticks:
+    You must respond ONLY with a raw JSON object matching this schema. Do not include markdown formatting, backticks, or any conversational text outside the JSON:
     {
       "intent": "LOG_BILL" | "LOG_INVOICE" | "LOG_PAYMENT_MADE" | "LOG_PAYMENT_RECEIVED" | "QUERY_FINANCES" | "GENERAL_HELP",
       "customer_name": "string | null",
       "supplier_name": "string | null",
-      "product_name": "string | null",
-      "account_name": "string | null",
-      "amount": number | null,
+      "total_amount": number | null,
       "status": "paid" | "open" | "partial" | "draft",
       "issue_date": "YYYY-MM-DD",
       "due_date": "YYYY-MM-DD | null",
-      "description": "string | null",
+      "line_items": [
+        {
+          "description": "string",
+          "quantity": number,
+          "unit_price": number,
+          "total": number,
+          "account_name": "string"
+        }
+      ],
       "is_complete": boolean,
       "clarification_question": "string | null",
       "conversational_response": "string | null"
@@ -161,9 +166,30 @@ export async function POST(request: Request) {
     let structuredData;
     try {
       structuredData = JSON.parse(cleanedText);
+      
+      // Basic runtime validation of AI response structure
+      if (!structuredData.intent) structuredData.intent = 'GENERAL_HELP';
+      
+      if (['LOG_BILL', 'LOG_INVOICE'].includes(structuredData.intent)) {
+        if (
+          !structuredData.total_amount || 
+          !structuredData.line_items || 
+          !Array.isArray(structuredData.line_items) || 
+          structuredData.line_items.length === 0
+        ) {
+          structuredData.is_complete = false;
+          structuredData.clarification_question = structuredData.clarification_question || "I couldn't detect the total amount or the individual items. Could you provide those details?";
+        }
+      }
     } catch (e) {
       console.error("Failed to parse JSON from AI response:", cleanedText);
-      throw new Error("AI returned malformed JSON response.");
+      // Graceful fallback instead of crashing
+      structuredData = {
+        intent: 'GENERAL_HELP',
+        is_complete: false,
+        clarification_question: "I couldn't quite understand that. Could you please rephrase or provide the receipt details again?",
+        conversational_response: null,
+      };
     }
 
     return NextResponse.json(structuredData, { status: 200 });

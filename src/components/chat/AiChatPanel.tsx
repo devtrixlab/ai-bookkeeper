@@ -13,12 +13,17 @@ interface ChatMessage {
   extractedDraft?: {
     intent: string;
     entity_name: string; // customer or supplier
-    account_name: string;
     amount: number;
     status: InvoiceStatus;
     issue_date: string;
     due_date?: string | null;
-    description?: string;
+    line_items?: Array<{
+      description: string;
+      quantity: number;
+      unit_price: number;
+      total: number;
+      account_name: string;
+    }>;
     transactionId?: string;
   } | null;
   timestamp: string;
@@ -159,7 +164,7 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
       }
 
       const ext = aiData;
-      const safeAmount = Math.round((ext.amount || 0) * 100) / 100;
+      const safeAmount = Math.round((ext.total_amount || 0) * 100) / 100;
       let insertedId = null;
 
       let receiptUrl = null;
@@ -179,95 +184,71 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
         }
       }
 
-      // Ensure Account exists
-      let targetAccountId = null;
-      if (ext.account_name) {
-        const extAccLower = ext.account_name.toLowerCase();
+      // Helper function to resolve or create account
+      async function resolveAccountId(accName: string, intent: string) {
+        if (!accName) return null;
+        const extAccLower = accName.toLowerCase();
         const matchedAccount = chartOfAccounts?.find(c => {
           const cNameLower = c.name.toLowerCase();
           return cNameLower === extAccLower || cNameLower.includes(extAccLower) || extAccLower.includes(cNameLower);
         });
-        if (matchedAccount) targetAccountId = matchedAccount.id;
-        else {
-          const accType = ext.intent === 'LOG_BILL' ? 'expense' : 'revenue';
-          const { data: newAccount } = await supabase
-            .from('accounts')
-            .insert({ user_id: user.id, name: ext.account_name, type: accType })
-            .select().single();
-          targetAccountId = newAccount?.id;
-        }
+        if (matchedAccount) return matchedAccount.id;
+        const accType = intent === 'LOG_BILL' ? 'expense' : 'revenue';
+        const { data: newAccount } = await supabase.from('accounts').insert({ user_id: user!.id, name: accName, type: accType }).select().single();
+        return newAccount?.id;
+      }
+
+      // Helper function to resolve or create product
+      async function resolveProductId(prodName: string, price: number) {
+        if (!prodName) return null;
+        const { data: upsertedProd } = await supabase.from('products').upsert({ user_id: user!.id, name: prodName, price }, { onConflict: 'user_id,name' }).select('id').single();
+        return upsertedProd?.id;
       }
 
       if (ext.intent === 'LOG_BILL') {
-        // Find/Create Supplier
         let supplierId = null;
         if (ext.supplier_name) {
-          const { data: upsertedSupp } = await supabase
-            .from('suppliers')
-            .upsert({ user_id: user.id, name: ext.supplier_name }, { onConflict: 'user_id,name' })
-            .select('id')
-            .single();
+          const { data: upsertedSupp } = await supabase.from('suppliers').upsert({ user_id: user.id, name: ext.supplier_name }, { onConflict: 'user_id,name' }).select('id').single();
           supplierId = upsertedSupp?.id;
         }
-        
-        // Insert Bill atomically
-        const { data: billId, error: rpcError } = await supabase.rpc('create_bill_atomic', {
-          p_user_id: user.id,
-          p_supplier_id: supplierId,
-          p_issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
-          p_due_date: ext.due_date || null,
-          p_status: ext.status || 'open',
-          p_total_amount: safeAmount,
-          p_account_id: targetAccountId,
-          p_description: ext.description || ext.product_name || 'General purchase',
-          p_receipt_url: receiptUrl
-        });
 
-        if (rpcError) throw rpcError;
-        insertedId = billId;
+        const { data: billData, error: billErr } = await supabase.from('bills').insert({
+          user_id: user.id, supplier_id: supplierId, issue_date: ext.issue_date || new Date().toISOString().split('T')[0], due_date: ext.due_date || null, status: ext.status || 'open', total_amount: safeAmount, balance_due: ext.status === 'paid' ? 0 : safeAmount, is_ai_verified: false, receipt_url: receiptUrl
+        }).select().single();
+        
+        if (billErr) throw billErr;
+        insertedId = billData.id;
+
+        for (const item of ext.line_items || []) {
+          const targetAccountId = await resolveAccountId(item.account_name, ext.intent);
+          const safeTotal = Math.round((item.total || 0) * 100) / 100;
+          await supabase.from('bill_lines').insert({
+            bill_id: insertedId, account_id: targetAccountId, description: item.description, amount: safeTotal
+          });
+        }
 
       } else if (ext.intent === 'LOG_INVOICE') {
-        // Find/Create Customer
         let customerId = null;
         if (ext.customer_name) {
-          const { data: upsertedCust } = await supabase
-            .from('customers')
-            .upsert({ user_id: user.id, name: ext.customer_name }, { onConflict: 'user_id,name' })
-            .select('id')
-            .single();
+          const { data: upsertedCust } = await supabase.from('customers').upsert({ user_id: user.id, name: ext.customer_name }, { onConflict: 'user_id,name' }).select('id').single();
           customerId = upsertedCust?.id;
         }
 
-        // Find or create product
-        const productName = ext.product_name || ext.description || 'General Service';
-        let productId = null;
+        const { data: invData, error: invErr } = await supabase.from('invoices').insert({
+          user_id: user.id, customer_id: customerId, issue_date: ext.issue_date || new Date().toISOString().split('T')[0], due_date: ext.due_date || null, status: ext.status || 'open', total_amount: safeAmount, balance_due: ext.status === 'paid' ? 0 : safeAmount, is_ai_verified: false, receipt_url: receiptUrl
+        }).select().single();
         
-        const { data: upsertedProd } = await supabase
-          .from('products')
-          .upsert({ user_id: user.id, name: productName, price: safeAmount }, { onConflict: 'user_id,name' })
-          .select('id')
-          .single();
-        productId = upsertedProd?.id;
+        if (invErr) throw invErr;
+        insertedId = invData.id;
 
-        if (!productId) {
-          throw new Error('Could not resolve or create product. Invoice line aborted.');
+        for (const item of ext.line_items || []) {
+          const safeTotal = Math.round((item.total || 0) * 100) / 100;
+          const safePrice = Math.round((item.unit_price || 0) * 100) / 100;
+          const productId = await resolveProductId(item.description, safePrice);
+          await supabase.from('invoice_lines').insert({
+            invoice_id: insertedId, product_id: productId, description: item.description, quantity: item.quantity || 1, unit_price: safePrice, total: safeTotal
+          });
         }
-
-        // Insert Invoice atomically
-        const { data: invoiceId, error: rpcError } = await supabase.rpc('create_invoice_atomic', {
-          p_user_id: user.id,
-          p_customer_id: customerId,
-          p_issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
-          p_due_date: ext.due_date || null,
-          p_status: ext.status || 'open',
-          p_total_amount: safeAmount,
-          p_product_id: productId,
-          p_description: ext.description || ext.product_name || 'General Service',
-          p_receipt_url: receiptUrl
-        });
-
-        if (rpcError) throw rpcError;
-        insertedId = invoiceId;
       }
 
       const finalAiMessage: ChatMessage = {
@@ -277,11 +258,11 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
         extractedDraft: {
           intent: ext.intent,
           entity_name: ext.supplier_name || ext.customer_name || 'Unknown',
-          account_name: ext.account_name || 'Uncategorized',
           amount: safeAmount,
           status: ext.status || 'open',
           issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
           due_date: ext.due_date,
+          line_items: ext.line_items,
           transactionId: insertedId
         },
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -398,8 +379,18 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
                       </div>
                     )}
                     <div className="col-span-2">
-                      <span className="text-gray-400 text-[10px]">Account:</span>
-                      <p className="font-semibold text-blue-600">{msg.extractedDraft.account_name}</p>
+                      <span className="text-gray-400 text-[10px]">Line Items:</span>
+                      <ul className="text-gray-700 mt-1 space-y-1">
+                        {msg.extractedDraft.line_items?.map((item, idx) => (
+                          <li key={idx} className="flex justify-between items-center text-[11px] bg-gray-50 p-1.5 rounded-lg border border-gray-100">
+                            <div>
+                              <p className="font-semibold text-gray-800">{item.description}</p>
+                              <p className="text-gray-500">{item.quantity} x {item.unit_price} PKR &middot; <span className="text-blue-600">{item.account_name}</span></p>
+                            </div>
+                            <p className="font-bold">{item.total} PKR</p>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   </div>
                   
