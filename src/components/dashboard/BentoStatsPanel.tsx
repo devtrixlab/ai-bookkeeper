@@ -22,6 +22,7 @@ import {
   Pie, 
   Cell 
 } from 'recharts';
+import { parseToCents, formatFromCents } from '@/utils/currency';
 
 type Invoice = {
   id: string; total_amount: number; balance_due: number; issue_date: string; status: string;
@@ -50,23 +51,25 @@ export default function BentoStatsPanel({
 }: BentoStatsPanelProps) {
   const [timeRange, setTimeRange] = useState<'Daily' | 'Monthly'>('Monthly');
 
-  // Compute metrics
+  // Compute metrics securely using cents to avoid float drift
   const totalRevenue = useMemo(() => {
-    const raw = invoices.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
-    return Math.round(raw * 100) / 100;
+    const rawCents = invoices.reduce((sum, inv) => sum + parseToCents(inv.total_amount || 0), 0);
+    return rawCents / 100;
   }, [invoices]);
 
   const totalExpenses = useMemo(() => {
-    const raw = bills.reduce((sum, bill) => sum + (bill.total_amount || 0), 0);
-    return Math.round(raw * 100) / 100;
+    const rawCents = bills.reduce((sum, bill) => sum + parseToCents(bill.total_amount || 0), 0);
+    return rawCents / 100;
   }, [bills]);
 
   const pendingReceivables = useMemo(() => {
-    return invoices.reduce((sum, inv) => sum + (inv.balance_due || 0), 0);
+    const rawCents = invoices.reduce((sum, inv) => sum + parseToCents(inv.balance_due || 0), 0);
+    return rawCents / 100;
   }, [invoices]);
 
   const pendingPayables = useMemo(() => {
-    return bills.reduce((sum, bill) => sum + (bill.balance_due || 0), 0);
+    const rawCents = bills.reduce((sum, bill) => sum + parseToCents(bill.balance_due || 0), 0);
+    return rawCents / 100;
   }, [bills]);
 
   const primaryCurrency = 'PKR';

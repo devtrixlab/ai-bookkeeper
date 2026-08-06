@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { Plus, Search, FileText, Users, Package, Edit2, Trash2, Loader2, X, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { parseToCents } from '@/utils/currency';
 
 export default function SalesHub() {
   const [activeTab, setActiveTab] = useState<'invoices' | 'customers' | 'products'>('invoices');
@@ -69,14 +70,14 @@ export default function SalesHub() {
     const toastId = toast.loading(isEditing ? "Updating Invoice..." : "Creating Invoice...");
     const { data: { user } } = await supabase.auth.getUser();
     
-    const safeAmount = Math.round(parseFloat(newInvoice.amount) * 100) / 100;
+    const safeAmountCents = parseToCents(newInvoice.amount);
     
     if (isEditing) {
       const { error } = await supabase.from('invoices').update({
         customer_id: newInvoice.customer_id,
         issue_date: newInvoice.issue_date,
-        total_amount: safeAmount,
-        balance_due: safeAmount,
+        total_amount: safeAmountCents / 100,
+        balance_due: safeAmountCents / 100,
       }).eq('id', newInvoice.id);
       
       if (error) {
@@ -91,8 +92,8 @@ export default function SalesHub() {
         user_id: user?.id,
         customer_id: newInvoice.customer_id,
         issue_date: newInvoice.issue_date,
-        total_amount: safeAmount,
-        balance_due: safeAmount,
+        total_amount: safeAmountCents / 100,
+        balance_due: safeAmountCents / 100,
         status: 'open',
         is_ai_verified: true // Manual entries are verified by default
       });

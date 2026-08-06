@@ -19,8 +19,8 @@ async function getSupabaseServerClient() {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options)
             )
-          } catch {
-            // Ignored in server components
+          } catch (e) {
+            console.error("Failed to set auth cookies:", e)
           }
         },
       },
@@ -43,8 +43,9 @@ export async function signUpWithEmail(formData: FormData) {
         email: data.user.email,
         created_at: new Date().toISOString()
       }, { onConflict: 'id' });
-    } catch {
-      // Profile table RLS fallback
+    } catch (e) {
+      console.error("Failed to upsert user profile:", e);
+      throw new Error("Critical error: Profile creation failed.");
     }
   }
 
@@ -66,8 +67,9 @@ export async function signInWithEmail(formData: FormData) {
         email: data.user.email,
         created_at: new Date().toISOString()
       }, { onConflict: 'id' });
-    } catch {
-      // Profile table RLS fallback
+    } catch (e) {
+      console.error("Failed to sync user profile on signin:", e);
+      throw new Error("Critical error: Profile sync failed.");
     }
   }
 

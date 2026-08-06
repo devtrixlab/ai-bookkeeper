@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { Plus, ArrowUp, Loader2, X, CheckCircle2, Receipt, Bot, User } from 'lucide-react';
 import { Account, InvoiceStatus } from '@/types';
+import { parseToCents, formatFromCents } from '@/utils/currency';
 
 interface ChatMessage {
   id: string;
@@ -164,7 +165,7 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
       }
 
       const ext = aiData;
-      const safeAmount = Math.round((ext.total_amount || 0) * 100) / 100;
+      const safeAmountCents = parseToCents(ext.total_amount || 0);
       let insertedId = null;
 
       let receiptUrl = null;
@@ -208,47 +209,71 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
       if (ext.intent === 'LOG_BILL') {
         let supplierId = null;
         if (ext.supplier_name) {
-          const { data: upsertedSupp } = await supabase.from('suppliers').upsert({ user_id: user.id, name: ext.supplier_name }, { onConflict: 'user_id,name' }).select('id').single();
+          const { data: upsertedSupp, error: suppErr } = await supabase.from('suppliers').upsert({ user_id: user.id, name: ext.supplier_name }, { onConflict: 'user_id,name' }).select('id').single();
+          if (suppErr) throw new Error(`Supplier resolution failed: ${suppErr.message}`);
           supplierId = upsertedSupp?.id;
         }
 
-        const { data: billData, error: billErr } = await supabase.from('bills').insert({
-          user_id: user.id, supplier_id: supplierId, issue_date: ext.issue_date || new Date().toISOString().split('T')[0], due_date: ext.due_date || null, status: ext.status || 'open', total_amount: safeAmount, balance_due: ext.status === 'paid' ? 0 : safeAmount, is_ai_verified: false, receipt_url: receiptUrl
-        }).select().single();
-        
-        if (billErr) throw billErr;
-        insertedId = billData.id;
-
+        const resolvedLines = [];
         for (const item of ext.line_items || []) {
           const targetAccountId = await resolveAccountId(item.account_name, ext.intent);
-          const safeTotal = Math.round((item.total || 0) * 100) / 100;
-          await supabase.from('bill_lines').insert({
-            bill_id: insertedId, account_id: targetAccountId, description: item.description, amount: safeTotal
+          if (!targetAccountId) throw new Error(`Account resolution failed for ${item.account_name}`);
+          resolvedLines.push({
+            account_id: targetAccountId,
+            description: item.description,
+            amount: parseToCents(item.total || 0) / 100 // RPC expects numeric string/float, we divide by 100 for NUMERIC(15,2)
           });
         }
+
+        const { data: billId, error: rpcError } = await supabase.rpc('create_bill_with_lines_atomic', {
+          p_user_id: user.id,
+          p_supplier_id: supplierId,
+          p_issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
+          p_due_date: ext.due_date || null,
+          p_status: ext.status || 'open',
+          p_total_amount: safeAmountCents / 100,
+          p_receipt_url: receiptUrl,
+          p_line_items: resolvedLines
+        });
+        
+        if (rpcError) throw new Error(`Atomic Bill Creation Failed: ${rpcError.message}`);
+        insertedId = billId;
 
       } else if (ext.intent === 'LOG_INVOICE') {
         let customerId = null;
         if (ext.customer_name) {
-          const { data: upsertedCust } = await supabase.from('customers').upsert({ user_id: user.id, name: ext.customer_name }, { onConflict: 'user_id,name' }).select('id').single();
+          const { data: upsertedCust, error: custErr } = await supabase.from('customers').upsert({ user_id: user.id, name: ext.customer_name }, { onConflict: 'user_id,name' }).select('id').single();
+          if (custErr) throw new Error(`Customer resolution failed: ${custErr.message}`);
           customerId = upsertedCust?.id;
         }
 
-        const { data: invData, error: invErr } = await supabase.from('invoices').insert({
-          user_id: user.id, customer_id: customerId, issue_date: ext.issue_date || new Date().toISOString().split('T')[0], due_date: ext.due_date || null, status: ext.status || 'open', total_amount: safeAmount, balance_due: ext.status === 'paid' ? 0 : safeAmount, is_ai_verified: false, receipt_url: receiptUrl
-        }).select().single();
-        
-        if (invErr) throw invErr;
-        insertedId = invData.id;
-
+        const resolvedLines = [];
         for (const item of ext.line_items || []) {
-          const safeTotal = Math.round((item.total || 0) * 100) / 100;
-          const safePrice = Math.round((item.unit_price || 0) * 100) / 100;
+          const safePrice = parseToCents(item.unit_price || 0) / 100;
           const productId = await resolveProductId(item.description, safePrice);
-          await supabase.from('invoice_lines').insert({
-            invoice_id: insertedId, product_id: productId, description: item.description, quantity: item.quantity || 1, unit_price: safePrice, total: safeTotal
+          if (!productId) throw new Error(`Product resolution failed for ${item.description}`);
+          resolvedLines.push({
+            product_id: productId,
+            description: item.description,
+            quantity: item.quantity || 1,
+            unit_price: safePrice,
+            total: parseToCents(item.total || 0) / 100
           });
         }
+
+        const { data: invoiceId, error: rpcError } = await supabase.rpc('create_invoice_with_lines_atomic', {
+          p_user_id: user.id,
+          p_customer_id: customerId,
+          p_issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
+          p_due_date: ext.due_date || null,
+          p_status: ext.status || 'open',
+          p_total_amount: safeAmountCents / 100,
+          p_receipt_url: receiptUrl,
+          p_line_items: resolvedLines
+        });
+        
+        if (rpcError) throw new Error(`Atomic Invoice Creation Failed: ${rpcError.message}`);
+        insertedId = invoiceId;
       }
 
       const finalAiMessage: ChatMessage = {
@@ -258,7 +283,7 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
         extractedDraft: {
           intent: ext.intent,
           entity_name: ext.supplier_name || ext.customer_name || 'Unknown',
-          amount: safeAmount,
+          amount: safeAmountCents / 100,
           status: ext.status || 'open',
           issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
           due_date: ext.due_date,
@@ -284,7 +309,7 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
       onDataChanged();
 
     } catch (err: any) {
-      console.error("Chat Extraction Error:", err);
+      console.error("[CRITICAL] Chat Extraction Failed:", err);
       let errorText = `Sorry, I encountered an issue: ${err.message || 'Could not process request.'}`;
       if (err.message?.includes('Unauthorized')) errorText = `⚠️ **Session Expired:** Please sign in again.`;
       

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { Plus, Search, Receipt, Truck, Edit2, Trash2, Loader2, X, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { parseToCents } from '@/utils/currency';
 
 export default function PurchasesHub() {
   const [activeTab, setActiveTab] = useState<'bills' | 'suppliers'>('bills');
@@ -73,14 +74,14 @@ export default function PurchasesHub() {
     const toastId = toast.loading(isEditing ? "Updating Bill..." : "Creating Bill...");
     const { data: { user } } = await supabase.auth.getUser();
     
-    const safeAmount = Math.round(parseFloat(newBill.amount) * 100) / 100;
+    const safeAmountCents = parseToCents(newBill.amount);
     
     if (isEditing) {
       const { error } = await supabase.from('bills').update({
         supplier_id: newBill.supplier_id,
         issue_date: newBill.issue_date,
-        total_amount: safeAmount,
-        balance_due: safeAmount,
+        total_amount: safeAmountCents / 100,
+        balance_due: safeAmountCents / 100,
       }).eq('id', newBill.id);
       
       if (error) {
@@ -90,7 +91,7 @@ export default function PurchasesHub() {
 
       const { error: lineError } = await supabase.from('bill_lines').update({
         account_id: newBill.account_id,
-        amount: safeAmount
+        amount: safeAmountCents / 100
       }).eq('bill_id', newBill.id);
 
       if (lineError) {
@@ -107,8 +108,8 @@ export default function PurchasesHub() {
         user_id: user?.id,
         supplier_id: newBill.supplier_id,
         issue_date: newBill.issue_date,
-        total_amount: safeAmount,
-        balance_due: safeAmount,
+        total_amount: safeAmountCents / 100,
+        balance_due: safeAmountCents / 100,
         status: 'open',
         is_ai_verified: true // Manual entries are verified by default
       }).select().single();
@@ -121,7 +122,7 @@ export default function PurchasesHub() {
       const { error: lineError } = await supabase.from('bill_lines').insert({
         bill_id: insertedBill.id,
         account_id: newBill.account_id,
-        amount: safeAmount,
+        amount: safeAmountCents / 100,
         description: 'Manual entry'
       });
 
