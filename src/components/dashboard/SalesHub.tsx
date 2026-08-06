@@ -2,13 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
-import { Plus, Search, FileText, Users, Package, MoreVertical, Loader2 } from 'lucide-react';
-import { Invoice } from '@/types';
+import { Plus, Search, FileText, Users, Package, MoreVertical, Loader2, X, AlertCircle } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 export default function SalesHub() {
   const [activeTab, setActiveTab] = useState<'invoices' | 'customers' | 'products'>('invoices');
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Modals state
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [newInvoice, setNewInvoice] = useState({ customer_id: '', issue_date: '', amount: '' });
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -17,25 +22,75 @@ export default function SalesHub() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [activeTab]);
 
   async function fetchData() {
     setIsLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data: invData } = await supabase
-      .from('invoices')
-      .select('*, customers(name)')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (invData) setInvoices(invData);
+    if (activeTab === 'invoices') {
+      const { data: invData } = await supabase
+        .from('invoices')
+        .select('*, customers(name)')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      if (invData) setInvoices(invData);
+    } else if (activeTab === 'customers') {
+      const { data: custData } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('name', { ascending: true });
+      if (custData) setCustomers(custData);
+    }
+    
     setIsLoading(false);
   }
 
+  // Pre-fetch customers for the modal
+  useEffect(() => {
+    async function getCustomers() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.from('customers').select('*').eq('user_id', user.id);
+      if (data) setCustomers(data);
+    }
+    getCustomers();
+  }, []);
+
+  async function handleCreateInvoice(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newInvoice.customer_id || !newInvoice.amount || !newInvoice.issue_date) {
+      toast.error("Please fill in all fields");
+      return;
+    }
+    
+    const toastId = toast.loading("Creating Invoice...");
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    const { error } = await supabase.from('invoices').insert({
+      user_id: user?.id,
+      customer_id: newInvoice.customer_id,
+      issue_date: newInvoice.issue_date,
+      total_amount: parseFloat(newInvoice.amount),
+      balance_due: parseFloat(newInvoice.amount),
+      status: 'open',
+      is_ai_verified: true // Manual entries are verified by default
+    });
+
+    if (error) {
+      toast.error(`Error: ${error.message}`, { id: toastId });
+    } else {
+      toast.success("Invoice created successfully!", { id: toastId });
+      setIsInvoiceModalOpen(false);
+      setNewInvoice({ customer_id: '', issue_date: '', amount: '' });
+      fetchData();
+    }
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
       
       {/* HEADER & TABS */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-2xl shadow-xs border border-gray-100">
@@ -61,12 +116,6 @@ export default function SalesHub() {
           >
             <Users className="w-4 h-4" /> Customers
           </button>
-          <button
-            onClick={() => setActiveTab('products')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all cursor-pointer ${activeTab === 'products' ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            <Package className="w-4 h-4" /> Products
-          </button>
         </div>
       </div>
 
@@ -84,9 +133,15 @@ export default function SalesHub() {
             />
           </div>
 
-          <button className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 transition-all cursor-pointer">
+          <button 
+            onClick={() => {
+              if (activeTab === 'invoices') setIsInvoiceModalOpen(true);
+              else toast('Customer modal coming soon!', { icon: '🚧' });
+            }}
+            className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 transition-all cursor-pointer"
+          >
             <Plus className="w-4 h-4 font-bold" />
-            New {activeTab === 'invoices' ? 'Invoice' : activeTab === 'customers' ? 'Customer' : 'Product'}
+            New {activeTab === 'invoices' ? 'Invoice' : 'Customer'}
           </button>
         </div>
 
@@ -106,19 +161,50 @@ export default function SalesHub() {
                     <th className="px-6 py-4">Issue Date</th>
                     <th className="px-6 py-4 text-right">Amount</th>
                     <th className="px-6 py-4 text-center">Status</th>
+                    <th className="px-6 py-4 text-center">AI Verified</th>
                     <th className="px-6 py-4"></th>
                   </tr>
                 )}
-                {/* For brevity, omitting Customers/Products tables until fully built */}
+                {activeTab === 'customers' && (
+                  <tr>
+                    <th className="px-6 py-4">Name</th>
+                    <th className="px-6 py-4">Email</th>
+                    <th className="px-6 py-4">Phone</th>
+                    <th className="px-6 py-4">Added</th>
+                  </tr>
+                )}
               </thead>
               <tbody className="divide-y divide-gray-100 text-gray-700">
+                
+                {/* EMPTY STATES */}
                 {activeTab === 'invoices' && invoices.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
-                      No invoices found. Create one manually or use the AI Assistant.
+                    <td colSpan={7} className="px-6 py-16 text-center">
+                      <div className="flex flex-col items-center justify-center space-y-3">
+                        <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-500">
+                          <FileText className="w-6 h-6" />
+                        </div>
+                        <p className="text-gray-500 font-medium">No invoices found</p>
+                        <p className="text-xs text-gray-400">Create one manually or use the AI Assistant to extract from a receipt.</p>
+                      </div>
                     </td>
                   </tr>
                 )}
+                {activeTab === 'customers' && customers.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-6 py-16 text-center">
+                      <div className="flex flex-col items-center justify-center space-y-3">
+                        <div className="w-12 h-12 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-500">
+                          <Users className="w-6 h-6" />
+                        </div>
+                        <p className="text-gray-500 font-medium">No customers found</p>
+                        <p className="text-xs text-gray-400">Customers are automatically created when the AI logs a new invoice.</p>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+
+                {/* DATA ROWS */}
                 {activeTab === 'invoices' && invoices.map((inv) => (
                   <tr key={inv.id} className="hover:bg-gray-50 transition-colors group">
                     <td className="px-6 py-4 font-medium text-gray-900">
@@ -142,11 +228,27 @@ export default function SalesHub() {
                         {inv.status.toUpperCase()}
                       </span>
                     </td>
+                    <td className="px-6 py-4 text-center">
+                      {inv.is_ai_verified ? (
+                        <span className="text-emerald-500 text-xs font-semibold flex justify-center"><AlertCircle className="w-4 h-4 hidden" /> Yes</span>
+                      ) : (
+                        <span className="text-amber-500 text-xs font-semibold flex justify-center items-center gap-1"><AlertCircle className="w-4 h-4" /> Pending</span>
+                      )}
+                    </td>
                     <td className="px-6 py-4 text-right">
                       <button className="p-1.5 text-gray-400 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
                         <MoreVertical className="w-4 h-4" />
                       </button>
                     </td>
+                  </tr>
+                ))}
+
+                {activeTab === 'customers' && customers.map((c) => (
+                  <tr key={c.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4 font-semibold text-gray-900">{c.name}</td>
+                    <td className="px-6 py-4 text-gray-500">{c.email || '-'}</td>
+                    <td className="px-6 py-4 text-gray-500">{c.phone || '-'}</td>
+                    <td className="px-6 py-4 text-gray-400 text-xs">{new Date(c.created_at).toLocaleDateString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -155,6 +257,71 @@ export default function SalesHub() {
         </div>
 
       </div>
+
+      {/* SLIDE-OVER MODAL FOR NEW INVOICE */}
+      {isInvoiceModalOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-white h-full shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <h2 className="text-lg font-bold text-gray-900">Create New Invoice</h2>
+              <button onClick={() => setIsInvoiceModalOpen(false)} className="p-2 text-gray-400 hover:text-gray-700 bg-white rounded-full shadow-xs cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleCreateInvoice} className="flex-1 overflow-y-auto p-6 space-y-5">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Customer</label>
+                <select 
+                  className="w-full border border-gray-200 bg-gray-50 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={newInvoice.customer_id}
+                  onChange={e => setNewInvoice({...newInvoice, customer_id: e.target.value})}
+                  required
+                >
+                  <option value="">Select a Customer</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <p className="text-[10px] text-gray-400 mt-1">If the customer is missing, ask the AI to "Create customer X".</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Issue Date</label>
+                <input 
+                  type="date" 
+                  className="w-full border border-gray-200 bg-gray-50 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={newInvoice.issue_date}
+                  onChange={e => setNewInvoice({...newInvoice, issue_date: e.target.value})}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Total Amount (PKR)</label>
+                <input 
+                  type="number" 
+                  min="0"
+                  step="0.01"
+                  className="w-full border border-gray-200 bg-gray-50 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={newInvoice.amount}
+                  onChange={e => setNewInvoice({...newInvoice, amount: e.target.value})}
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+            </form>
+
+            <div className="p-6 border-t border-gray-100 bg-white flex gap-3">
+              <button type="button" onClick={() => setIsInvoiceModalOpen(false)} className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleCreateInvoice} className="flex-1 px-4 py-2.5 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors shadow-md shadow-blue-500/20">
+                Create Invoice
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
