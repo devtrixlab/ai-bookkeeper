@@ -12,19 +12,29 @@ CREATE TABLE IF NOT EXISTS ai_chat_logs (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Enable RLS on ai_chat_logs
+ALTER TABLE ai_chat_logs ENABLE ROW LEVEL SECURITY;
+
+-- Create policies for ai_chat_logs
+CREATE POLICY "Users can insert their own chat logs" 
+ON ai_chat_logs FOR INSERT 
+WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can view their own chat logs" 
+ON ai_chat_logs FOR SELECT 
+USING (auth.uid() = user_id);
+
 -- 3. We need a Supabase Storage bucket for receipts. 
--- In SQL, we insert into storage.buckets if it doesn't exist.
--- Note: 'storage' schema must exist. Supabase manages this.
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('receipts', 'receipts', true)
 ON CONFLICT (id) DO NOTHING;
 
--- Allow public read access to receipts
-CREATE POLICY "Public receipts"
+-- Policies for receipts bucket (storage.objects)
+-- Note: RLS is enabled on storage.objects by default in Supabase.
+CREATE POLICY "Public receipts read access"
 ON storage.objects FOR SELECT
 USING (bucket_id = 'receipts');
 
--- Allow authenticated users to insert receipts
 CREATE POLICY "Auth users can upload receipts"
 ON storage.objects FOR INSERT
 WITH CHECK (
