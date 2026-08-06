@@ -159,6 +159,7 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
       }
 
       const ext = aiData;
+      const safeAmount = Math.round((ext.amount || 0) * 100) / 100;
       let insertedId = null;
 
       let receiptUrl = null;
@@ -201,90 +202,72 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
         // Find/Create Supplier
         let supplierId = null;
         if (ext.supplier_name) {
-          const { data: existingSupp } = await supabase.from('suppliers').select('id').eq('user_id', user.id).ilike('name', ext.supplier_name).limit(1).maybeSingle();
-          if (existingSupp) supplierId = existingSupp.id;
-          else {
-            const { data: newSupp } = await supabase.from('suppliers').insert({ user_id: user.id, name: ext.supplier_name }).select().single();
-            supplierId = newSupp?.id;
-          }
+          const { data: upsertedSupp } = await supabase
+            .from('suppliers')
+            .upsert({ user_id: user.id, name: ext.supplier_name }, { onConflict: 'user_id,name' })
+            .select('id')
+            .single();
+          supplierId = upsertedSupp?.id;
         }
         
-        // Insert Bill
-        const { data: insertedBill, error: insertError } = await supabase.from('bills').insert({
-          user_id: user.id,
-          supplier_id: supplierId,
-          issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
-          due_date: ext.due_date || null,
-          status: ext.status || 'open',
-          total_amount: ext.amount || 0,
-          balance_due: ext.status === 'paid' ? 0 : (ext.amount || 0),
-          is_ai_verified: false,
-          receipt_url: receiptUrl
-        }).select().single();
-
-        if (insertError) throw insertError;
-        insertedId = insertedBill.id;
-
-        // Insert Bill Line
-        await supabase.from('bill_lines').insert({
-          bill_id: insertedId,
-          account_id: targetAccountId,
-          description: ext.description || ext.product_name || 'General purchase',
-          amount: ext.amount || 0
+        // Insert Bill atomically
+        const { data: billId, error: rpcError } = await supabase.rpc('create_bill_atomic', {
+          p_user_id: user.id,
+          p_supplier_id: supplierId,
+          p_issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
+          p_due_date: ext.due_date || null,
+          p_status: ext.status || 'open',
+          p_total_amount: safeAmount,
+          p_account_id: targetAccountId,
+          p_description: ext.description || ext.product_name || 'General purchase',
+          p_receipt_url: receiptUrl
         });
+
+        if (rpcError) throw rpcError;
+        insertedId = billId;
 
       } else if (ext.intent === 'LOG_INVOICE') {
         // Find/Create Customer
         let customerId = null;
         if (ext.customer_name) {
-          const { data: existingCust } = await supabase.from('customers').select('id').eq('user_id', user.id).ilike('name', ext.customer_name).limit(1).maybeSingle();
-          if (existingCust) customerId = existingCust.id;
-          else {
-            const { data: newCust } = await supabase.from('customers').insert({ user_id: user.id, name: ext.customer_name }).select().single();
-            customerId = newCust?.id;
-          }
+          const { data: upsertedCust } = await supabase
+            .from('customers')
+            .upsert({ user_id: user.id, name: ext.customer_name }, { onConflict: 'user_id,name' })
+            .select('id')
+            .single();
+          customerId = upsertedCust?.id;
         }
-
-        // Insert Invoice
-        const { data: insertedInv, error: insertError } = await supabase.from('invoices').insert({
-          user_id: user.id,
-          customer_id: customerId,
-          issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
-          due_date: ext.due_date || null,
-          status: ext.status || 'open',
-          total_amount: ext.amount || 0,
-          balance_due: ext.status === 'paid' ? 0 : (ext.amount || 0),
-          is_ai_verified: false,
-          receipt_url: receiptUrl
-        }).select().single();
-
-        if (insertError) throw insertError;
-        insertedId = insertedInv.id;
 
         // Find or create product
         const productName = ext.product_name || ext.description || 'General Service';
         let productId = null;
-        const { data: existingProd } = await supabase.from('products').select('id').eq('user_id', user.id).ilike('name', productName).limit(1).maybeSingle();
         
-        if (existingProd) {
-          productId = existingProd.id;
-        } else {
-          const { data: newProd } = await supabase.from('products').insert({ user_id: user.id, name: productName, price: ext.amount || 0 }).select().single();
-          productId = newProd?.id;
-        }
+        const { data: upsertedProd } = await supabase
+          .from('products')
+          .upsert({ user_id: user.id, name: productName, price: safeAmount }, { onConflict: 'user_id,name' })
+          .select('id')
+          .single();
+        productId = upsertedProd?.id;
 
-        // Insert Invoice Line
         if (!productId) {
           throw new Error('Could not resolve or create product. Invoice line aborted.');
         }
-        await supabase.from('invoice_lines').insert({
-          invoice_id: insertedId,
-          product_id: productId,
-          description: ext.description || ext.product_name,
-          quantity: 1,
-          unit_price: ext.amount || 0,
-          total: ext.amount || 0
+
+        // Insert Invoice atomically
+        const { data: invoiceId, error: rpcError } = await supabase.rpc('create_invoice_atomic', {
+          p_user_id: user.id,
+          p_customer_id: customerId,
+          p_issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
+          p_due_date: ext.due_date || null,
+          p_status: ext.status || 'open',
+          p_total_amount: safeAmount,
+          p_product_id: productId,
+          p_description: ext.description || ext.product_name || 'General Service',
+          p_receipt_url: receiptUrl
         });
+
+        if (rpcError) throw rpcError;
+        insertedId = invoiceId;
       }
 
       const finalAiMessage: ChatMessage = {
@@ -295,7 +278,7 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
           intent: ext.intent,
           entity_name: ext.supplier_name || ext.customer_name || 'Unknown',
           account_name: ext.account_name || 'Uncategorized',
-          amount: ext.amount || 0,
+          amount: safeAmount,
           status: ext.status || 'open',
           issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
           due_date: ext.due_date,

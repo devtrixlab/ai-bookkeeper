@@ -52,11 +52,13 @@ export default function BentoStatsPanel({
 
   // Compute metrics
   const totalRevenue = useMemo(() => {
-    return invoices.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+    const raw = invoices.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+    return Math.round(raw * 100) / 100;
   }, [invoices]);
 
   const totalExpenses = useMemo(() => {
-    return bills.reduce((sum, bill) => sum + (bill.total_amount || 0), 0);
+    const raw = bills.reduce((sum, bill) => sum + (bill.total_amount || 0), 0);
+    return Math.round(raw * 100) / 100;
   }, [bills]);
 
   const pendingReceivables = useMemo(() => {

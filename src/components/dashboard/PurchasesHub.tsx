@@ -73,12 +73,14 @@ export default function PurchasesHub() {
     const toastId = toast.loading(isEditing ? "Updating Bill..." : "Creating Bill...");
     const { data: { user } } = await supabase.auth.getUser();
     
+    const safeAmount = Math.round(parseFloat(newBill.amount) * 100) / 100;
+    
     if (isEditing) {
       const { error } = await supabase.from('bills').update({
         supplier_id: newBill.supplier_id,
         issue_date: newBill.issue_date,
-        total_amount: parseFloat(newBill.amount),
-        balance_due: parseFloat(newBill.amount),
+        total_amount: safeAmount,
+        balance_due: safeAmount,
       }).eq('id', newBill.id);
       
       if (error) {
@@ -86,10 +88,9 @@ export default function PurchasesHub() {
         return;
       }
 
-      // Also update the bill line (assuming one expense line per bill for MVP)
       const { error: lineError } = await supabase.from('bill_lines').update({
         account_id: newBill.account_id,
-        amount: parseFloat(newBill.amount)
+        amount: safeAmount
       }).eq('bill_id', newBill.id);
 
       if (lineError) {
@@ -106,8 +107,8 @@ export default function PurchasesHub() {
         user_id: user?.id,
         supplier_id: newBill.supplier_id,
         issue_date: newBill.issue_date,
-        total_amount: parseFloat(newBill.amount),
-        balance_due: parseFloat(newBill.amount),
+        total_amount: safeAmount,
+        balance_due: safeAmount,
         status: 'open',
         is_ai_verified: true // Manual entries are verified by default
       }).select().single();
@@ -117,11 +118,10 @@ export default function PurchasesHub() {
         return;
       }
 
-      // Insert Bill Line for Expense Account routing
       const { error: lineError } = await supabase.from('bill_lines').insert({
         bill_id: insertedBill.id,
         account_id: newBill.account_id,
-        amount: parseFloat(newBill.amount),
+        amount: safeAmount,
         description: 'Manual entry'
       });
 
@@ -136,6 +136,11 @@ export default function PurchasesHub() {
   }
 
   async function handleDeleteBill(id: string) {
+    const bill = bills.find(b => b.id === id);
+    if (bill?.is_ai_verified) {
+      toast.error("Verified bills cannot be deleted. They are part of your permanent ledger.");
+      return;
+    }
     if (!window.confirm("Are you sure you want to delete this bill? This will also remove the corresponding journal entries.")) return;
     const toastId = toast.loading("Deleting bill...");
     const { error } = await supabase.from('bills').delete().eq('id', id);

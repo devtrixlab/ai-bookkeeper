@@ -69,12 +69,14 @@ export default function SalesHub() {
     const toastId = toast.loading(isEditing ? "Updating Invoice..." : "Creating Invoice...");
     const { data: { user } } = await supabase.auth.getUser();
     
+    const safeAmount = Math.round(parseFloat(newInvoice.amount) * 100) / 100;
+    
     if (isEditing) {
       const { error } = await supabase.from('invoices').update({
         customer_id: newInvoice.customer_id,
         issue_date: newInvoice.issue_date,
-        total_amount: parseFloat(newInvoice.amount),
-        balance_due: parseFloat(newInvoice.amount),
+        total_amount: safeAmount,
+        balance_due: safeAmount,
       }).eq('id', newInvoice.id);
       
       if (error) {
@@ -89,8 +91,8 @@ export default function SalesHub() {
         user_id: user?.id,
         customer_id: newInvoice.customer_id,
         issue_date: newInvoice.issue_date,
-        total_amount: parseFloat(newInvoice.amount),
-        balance_due: parseFloat(newInvoice.amount),
+        total_amount: safeAmount,
+        balance_due: safeAmount,
         status: 'open',
         is_ai_verified: true // Manual entries are verified by default
       });
@@ -106,6 +108,11 @@ export default function SalesHub() {
   }
 
   async function handleDeleteInvoice(id: string) {
+    const inv = invoices.find(i => i.id === id);
+    if (inv?.is_ai_verified) {
+      toast.error("Verified invoices cannot be deleted. They are part of your permanent ledger.");
+      return;
+    }
     if (!window.confirm("Are you sure you want to delete this invoice? This will also remove the corresponding journal entries.")) return;
     const toastId = toast.loading("Deleting invoice...");
     const { error } = await supabase.from('invoices').delete().eq('id', id);
