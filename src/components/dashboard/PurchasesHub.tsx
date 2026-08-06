@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
-import { Plus, Search, Receipt, Truck, MoreVertical, Loader2, X, AlertCircle } from 'lucide-react';
+import { Plus, Search, Receipt, Truck, Edit2, Trash2, Loader2, X, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function PurchasesHub() {
@@ -12,9 +12,9 @@ export default function PurchasesHub() {
   const [chartOfAccounts, setChartOfAccounts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Modals state
   const [isBillModalOpen, setIsBillModalOpen] = useState(false);
-  const [newBill, setNewBill] = useState({ supplier_id: '', account_id: '', issue_date: '', amount: '' });
+  const [newBill, setNewBill] = useState({ id: '', supplier_id: '', account_id: '', issue_date: '', amount: '' });
+  const [isEditing, setIsEditing] = useState(false);
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -63,48 +63,109 @@ export default function PurchasesHub() {
     getModalData();
   }, []);
 
-  async function handleCreateBill(e: React.FormEvent) {
+  async function handleCreateOrUpdateBill(e: React.FormEvent) {
     e.preventDefault();
     if (!newBill.supplier_id || !newBill.amount || !newBill.issue_date || !newBill.account_id) {
       toast.error("Please fill in all fields");
       return;
     }
     
-    const toastId = toast.loading("Creating Bill...");
+    const toastId = toast.loading(isEditing ? "Updating Bill..." : "Creating Bill...");
     const { data: { user } } = await supabase.auth.getUser();
     
-    // Insert Bill
-    const { data: insertedBill, error: billError } = await supabase.from('bills').insert({
-      user_id: user?.id,
-      supplier_id: newBill.supplier_id,
-      issue_date: newBill.issue_date,
-      total_amount: parseFloat(newBill.amount),
-      balance_due: parseFloat(newBill.amount),
-      status: 'open',
-      is_ai_verified: true // Manual entries are verified by default
-    }).select().single();
+    if (isEditing) {
+      const { error } = await supabase.from('bills').update({
+        supplier_id: newBill.supplier_id,
+        issue_date: newBill.issue_date,
+        total_amount: parseFloat(newBill.amount),
+        balance_due: parseFloat(newBill.amount),
+      }).eq('id', newBill.id);
+      
+      if (error) {
+        toast.error(`Error: ${error.message}`, { id: toastId });
+        return;
+      }
 
-    if (billError) {
-      toast.error(`Error: ${billError.message}`, { id: toastId });
-      return;
-    }
+      // Also update the bill line (assuming one expense line per bill for MVP)
+      const { error: lineError } = await supabase.from('bill_lines').update({
+        account_id: newBill.account_id,
+        amount: parseFloat(newBill.amount)
+      }).eq('bill_id', newBill.id);
 
-    // Insert Bill Line for Expense Account routing
-    const { error: lineError } = await supabase.from('bill_lines').insert({
-      bill_id: insertedBill.id,
-      account_id: newBill.account_id,
-      amount: parseFloat(newBill.amount),
-      description: 'Manual entry'
-    });
+      if (lineError) {
+        toast.error(`Error linking account: ${lineError.message}`, { id: toastId });
+      } else {
+        toast.success("Bill updated successfully!", { id: toastId });
+        closeModal();
+        fetchData();
+      }
 
-    if (lineError) {
-      toast.error(`Error linking account: ${lineError.message}`, { id: toastId });
     } else {
-      toast.success("Bill created and posted to ledger!", { id: toastId });
-      setIsBillModalOpen(false);
-      setNewBill({ supplier_id: '', account_id: '', issue_date: '', amount: '' });
+      // Insert Bill
+      const { data: insertedBill, error: billError } = await supabase.from('bills').insert({
+        user_id: user?.id,
+        supplier_id: newBill.supplier_id,
+        issue_date: newBill.issue_date,
+        total_amount: parseFloat(newBill.amount),
+        balance_due: parseFloat(newBill.amount),
+        status: 'open',
+        is_ai_verified: true // Manual entries are verified by default
+      }).select().single();
+
+      if (billError) {
+        toast.error(`Error: ${billError.message}`, { id: toastId });
+        return;
+      }
+
+      // Insert Bill Line for Expense Account routing
+      const { error: lineError } = await supabase.from('bill_lines').insert({
+        bill_id: insertedBill.id,
+        account_id: newBill.account_id,
+        amount: parseFloat(newBill.amount),
+        description: 'Manual entry'
+      });
+
+      if (lineError) {
+        toast.error(`Error linking account: ${lineError.message}`, { id: toastId });
+      } else {
+        toast.success("Bill created and posted to ledger!", { id: toastId });
+        closeModal();
+        fetchData();
+      }
+    }
+  }
+
+  async function handleDeleteBill(id: string) {
+    if (!window.confirm("Are you sure you want to delete this bill? This will also remove the corresponding journal entries.")) return;
+    const toastId = toast.loading("Deleting bill...");
+    const { error } = await supabase.from('bills').delete().eq('id', id);
+    if (error) {
+      toast.error(`Error: ${error.message}`, { id: toastId });
+    } else {
+      toast.success("Bill deleted!", { id: toastId });
       fetchData();
     }
+  }
+
+  async function openEditModal(bill: any) {
+    setIsEditing(true);
+    // Fetch the bill line to get the account_id
+    const { data: line } = await supabase.from('bill_lines').select('account_id').eq('bill_id', bill.id).limit(1).single();
+    
+    setNewBill({
+      id: bill.id,
+      supplier_id: bill.supplier_id,
+      account_id: line?.account_id || '',
+      issue_date: bill.issue_date,
+      amount: bill.total_amount.toString()
+    });
+    setIsBillModalOpen(true);
+  }
+
+  function closeModal() {
+    setIsBillModalOpen(false);
+    setIsEditing(false);
+    setNewBill({ id: '', supplier_id: '', account_id: '', issue_date: '', amount: '' });
   }
 
   return (
@@ -153,7 +214,11 @@ export default function PurchasesHub() {
 
           <button 
             onClick={() => {
-              if (activeTab === 'bills') setIsBillModalOpen(true);
+              if (activeTab === 'bills') {
+                setIsEditing(false);
+                setNewBill({ id: '', supplier_id: '', account_id: '', issue_date: '', amount: '' });
+                setIsBillModalOpen(true);
+              }
               else toast('Supplier modal coming soon!', { icon: '🚧' });
             }}
             className="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 shadow-md shadow-indigo-500/20 transition-all cursor-pointer"
@@ -253,9 +318,12 @@ export default function PurchasesHub() {
                         <span className="text-amber-500 text-xs font-semibold flex justify-center items-center gap-1"><AlertCircle className="w-4 h-4" /> Pending</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <button className="p-1.5 text-gray-400 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
-                        <MoreVertical className="w-4 h-4" />
+                    <td className="px-6 py-4 text-right flex justify-end gap-2">
+                      <button onClick={() => openEditModal(bill)} className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleDeleteBill(bill.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </td>
                   </tr>
@@ -280,13 +348,13 @@ export default function PurchasesHub() {
         <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="w-full max-w-md bg-white h-full shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
             <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <h2 className="text-lg font-bold text-gray-900">Create New Bill</h2>
-              <button onClick={() => setIsBillModalOpen(false)} className="p-2 text-gray-400 hover:text-gray-700 bg-white rounded-full shadow-xs cursor-pointer">
+              <h2 className="text-lg font-bold text-gray-900">{isEditing ? 'Edit Bill' : 'Create New Bill'}</h2>
+              <button onClick={closeModal} className="p-2 text-gray-400 hover:text-gray-700 bg-white rounded-full shadow-xs cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
             
-            <form onSubmit={handleCreateBill} className="flex-1 overflow-y-auto p-6 space-y-5">
+            <form onSubmit={handleCreateOrUpdateBill} className="flex-1 overflow-y-auto p-6 space-y-5">
               <div>
                 <label className="block text-xs font-bold text-gray-700 mb-1">Supplier</label>
                 <select 
@@ -341,11 +409,11 @@ export default function PurchasesHub() {
             </form>
 
             <div className="p-6 border-t border-gray-100 bg-white flex gap-3">
-              <button type="button" onClick={() => setIsBillModalOpen(false)} className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors">
+              <button type="button" onClick={closeModal} className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors cursor-pointer">
                 Cancel
               </button>
-              <button onClick={handleCreateBill} className="flex-1 px-4 py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-500/20">
-                Create Bill
+              <button onClick={handleCreateOrUpdateBill} className="flex-1 px-4 py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-500/20 cursor-pointer">
+                {isEditing ? 'Save Changes' : 'Create Bill'}
               </button>
             </div>
           </div>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
-import { Plus, Search, FileText, Users, Package, MoreVertical, Loader2, X, AlertCircle } from 'lucide-react';
+import { Plus, Search, FileText, Users, Package, Edit2, Trash2, Loader2, X, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function SalesHub() {
@@ -11,9 +11,9 @@ export default function SalesHub() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Modals state
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
-  const [newInvoice, setNewInvoice] = useState({ customer_id: '', issue_date: '', amount: '' });
+  const [newInvoice, setNewInvoice] = useState({ id: '', customer_id: '', issue_date: '', amount: '' });
+  const [isEditing, setIsEditing] = useState(false);
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -59,34 +59,79 @@ export default function SalesHub() {
     getCustomers();
   }, []);
 
-  async function handleCreateInvoice(e: React.FormEvent) {
+  async function handleCreateOrUpdateInvoice(e: React.FormEvent) {
     e.preventDefault();
     if (!newInvoice.customer_id || !newInvoice.amount || !newInvoice.issue_date) {
       toast.error("Please fill in all fields");
       return;
     }
     
-    const toastId = toast.loading("Creating Invoice...");
+    const toastId = toast.loading(isEditing ? "Updating Invoice..." : "Creating Invoice...");
     const { data: { user } } = await supabase.auth.getUser();
     
-    const { error } = await supabase.from('invoices').insert({
-      user_id: user?.id,
-      customer_id: newInvoice.customer_id,
-      issue_date: newInvoice.issue_date,
-      total_amount: parseFloat(newInvoice.amount),
-      balance_due: parseFloat(newInvoice.amount),
-      status: 'open',
-      is_ai_verified: true // Manual entries are verified by default
-    });
+    if (isEditing) {
+      const { error } = await supabase.from('invoices').update({
+        customer_id: newInvoice.customer_id,
+        issue_date: newInvoice.issue_date,
+        total_amount: parseFloat(newInvoice.amount),
+        balance_due: parseFloat(newInvoice.amount),
+      }).eq('id', newInvoice.id);
+      
+      if (error) {
+        toast.error(`Error: ${error.message}`, { id: toastId });
+      } else {
+        toast.success("Invoice updated successfully!", { id: toastId });
+        closeModal();
+        fetchData();
+      }
+    } else {
+      const { error } = await supabase.from('invoices').insert({
+        user_id: user?.id,
+        customer_id: newInvoice.customer_id,
+        issue_date: newInvoice.issue_date,
+        total_amount: parseFloat(newInvoice.amount),
+        balance_due: parseFloat(newInvoice.amount),
+        status: 'open',
+        is_ai_verified: true // Manual entries are verified by default
+      });
 
+      if (error) {
+        toast.error(`Error: ${error.message}`, { id: toastId });
+      } else {
+        toast.success("Invoice created successfully!", { id: toastId });
+        closeModal();
+        fetchData();
+      }
+    }
+  }
+
+  async function handleDeleteInvoice(id: string) {
+    if (!window.confirm("Are you sure you want to delete this invoice? This will also remove the corresponding journal entries.")) return;
+    const toastId = toast.loading("Deleting invoice...");
+    const { error } = await supabase.from('invoices').delete().eq('id', id);
     if (error) {
       toast.error(`Error: ${error.message}`, { id: toastId });
     } else {
-      toast.success("Invoice created successfully!", { id: toastId });
-      setIsInvoiceModalOpen(false);
-      setNewInvoice({ customer_id: '', issue_date: '', amount: '' });
+      toast.success("Invoice deleted!", { id: toastId });
       fetchData();
     }
+  }
+
+  function openEditModal(inv: any) {
+    setIsEditing(true);
+    setNewInvoice({
+      id: inv.id,
+      customer_id: inv.customer_id,
+      issue_date: inv.issue_date,
+      amount: inv.total_amount.toString()
+    });
+    setIsInvoiceModalOpen(true);
+  }
+
+  function closeModal() {
+    setIsInvoiceModalOpen(false);
+    setIsEditing(false);
+    setNewInvoice({ id: '', customer_id: '', issue_date: '', amount: '' });
   }
 
   return (
@@ -135,7 +180,11 @@ export default function SalesHub() {
 
           <button 
             onClick={() => {
-              if (activeTab === 'invoices') setIsInvoiceModalOpen(true);
+              if (activeTab === 'invoices') {
+                setIsEditing(false);
+                setNewInvoice({ id: '', customer_id: '', issue_date: '', amount: '' });
+                setIsInvoiceModalOpen(true);
+              }
               else toast('Customer modal coming soon!', { icon: '🚧' });
             }}
             className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 transition-all cursor-pointer"
@@ -235,9 +284,12 @@ export default function SalesHub() {
                         <span className="text-amber-500 text-xs font-semibold flex justify-center items-center gap-1"><AlertCircle className="w-4 h-4" /> Pending</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <button className="p-1.5 text-gray-400 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
-                        <MoreVertical className="w-4 h-4" />
+                    <td className="px-6 py-4 text-right flex justify-end gap-2">
+                      <button onClick={() => openEditModal(inv)} className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </td>
                   </tr>
@@ -263,13 +315,13 @@ export default function SalesHub() {
         <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="w-full max-w-md bg-white h-full shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
             <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <h2 className="text-lg font-bold text-gray-900">Create New Invoice</h2>
-              <button onClick={() => setIsInvoiceModalOpen(false)} className="p-2 text-gray-400 hover:text-gray-700 bg-white rounded-full shadow-xs cursor-pointer">
+              <h2 className="text-lg font-bold text-gray-900">{isEditing ? 'Edit Invoice' : 'Create New Invoice'}</h2>
+              <button onClick={closeModal} className="p-2 text-gray-400 hover:text-gray-700 bg-white rounded-full shadow-xs cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
             
-            <form onSubmit={handleCreateInvoice} className="flex-1 overflow-y-auto p-6 space-y-5">
+            <form onSubmit={handleCreateOrUpdateInvoice} className="flex-1 overflow-y-auto p-6 space-y-5">
               <div>
                 <label className="block text-xs font-bold text-gray-700 mb-1">Customer</label>
                 <select 
@@ -311,11 +363,11 @@ export default function SalesHub() {
             </form>
 
             <div className="p-6 border-t border-gray-100 bg-white flex gap-3">
-              <button type="button" onClick={() => setIsInvoiceModalOpen(false)} className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors">
+              <button type="button" onClick={closeModal} className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors cursor-pointer">
                 Cancel
               </button>
-              <button onClick={handleCreateInvoice} className="flex-1 px-4 py-2.5 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors shadow-md shadow-blue-500/20">
-                Create Invoice
+              <button onClick={handleCreateOrUpdateInvoice} className="flex-1 px-4 py-2.5 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors shadow-md shadow-blue-500/20 cursor-pointer">
+                {isEditing ? 'Save Changes' : 'Create Invoice'}
               </button>
             </div>
           </div>
