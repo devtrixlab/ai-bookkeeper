@@ -11,14 +11,16 @@ export type PendingItem = {
   amount: number;
   date: string;
   status: string;
+  receiptUrl?: string;
 };
 
 interface PendingTableProps {
   items: PendingItem[];
   onDataChanged: () => void;
+  onViewLog?: (id: string) => void;
 }
 
-export default function PendingTable({ items, onDataChanged }: PendingTableProps) {
+export default function PendingTable({ items, onDataChanged, onViewLog }: PendingTableProps) {
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -74,6 +76,16 @@ export default function PendingTable({ items, onDataChanged }: PendingTableProps
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-100">
                       <Receipt className="w-3.5 h-3.5" /> Bill
                     </span>
+                  )}
+                  {t.receiptUrl && (
+                    <a href={t.receiptUrl} target="_blank" rel="noreferrer" className="inline-flex ml-2 items-center text-xs text-blue-600 hover:underline">
+                      View Receipt
+                    </a>
+                  )}
+                  {onViewLog && (
+                    <button onClick={() => onViewLog(t.id)} className="inline-flex ml-2 items-center text-xs text-gray-500 hover:text-gray-900 underline">
+                      Audit Log
+                    </button>
                   )}
                 </td>
                 <td className="px-6 py-3 text-gray-500">{t.date}</td>

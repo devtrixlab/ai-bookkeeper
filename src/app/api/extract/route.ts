@@ -46,7 +46,11 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { prompt, image: base64Image, history = [] } = body;
+    const { prompt, image: base64Image, history = [], chartOfAccounts = [] } = body;
+    
+    // Create a string list of valid account names
+    const accountNames = chartOfAccounts.map((a: any) => a.name).join(", ") || "No accounts provided";
+    const today = new Date().toISOString().split('T')[0];
 
     // 1. Validation
     if (!prompt && !base64Image) {
@@ -88,6 +92,9 @@ export async function POST(request: Request) {
     1. If critical fields (amount, customer/supplier name) are missing, DO NOT guess them. Set "is_complete": false and ask a conversational "clarification_question".
     2. Use 'supplier_name' for bills and payments made. Use 'customer_name' for invoices and payments received.
     3. Determine if the transaction is fully paid ("status": "paid") or just an open invoice/bill ("status": "open").
+    4. You MUST extract what was actually bought/sold and place it in the "product_name" or "description" field. Never leave it blank if goods/services are mentioned.
+    5. CRITICAL ACCOUNT MAPPING: You MUST map the transaction's account_name to exactly one of these existing accounts: [${accountNames}]. Choose the one that best fits. If none fit perfectly, pick the closest match (e.g. 'General Expenses' for random bills, 'Sales Revenue' for invoices).
+    6. DATES: Today's date is ${today}. If the user says "yesterday" or "today" or a day of the week, calculate the exact YYYY-MM-DD based on today. If no date is given, default to ${today}.
     
     OUTPUT FORMAT:
     You must respond ONLY with a raw JSON object matching this schema. Do not include markdown formatting or backticks:

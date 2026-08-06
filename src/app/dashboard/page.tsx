@@ -10,6 +10,7 @@ import SalesHub from '@/components/dashboard/SalesHub';
 import PurchasesHub from '@/components/dashboard/PurchasesHub';
 import ReportsHub from '@/components/dashboard/ReportsHub';
 import PendingTable, { PendingItem } from '@/components/dashboard/PendingTable';
+import AiChatLogModal from '@/components/dashboard/AiChatLogModal';
 
 export default function DashboardPage() {
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -20,6 +21,7 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'sales' | 'purchases' | 'reports'>('overview');
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const [logModalTxId, setLogModalTxId] = useState<string | null>(null);
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -89,12 +91,12 @@ export default function DashboardPage() {
     const pending: PendingItem[] = [];
     if (invoicesData) {
       invoicesData.filter((i: any) => !i.is_ai_verified).forEach((i: any) => {
-        pending.push({ id: i.id, type: 'invoice', entityName: i.customers?.name || 'Unknown', amount: i.total_amount, date: i.issue_date, status: i.status });
+        pending.push({ id: i.id, type: 'invoice', entityName: i.customers?.name || 'Unknown', amount: i.total_amount, date: i.issue_date, status: i.status, receiptUrl: i.receipt_url });
       });
     }
     if (billData) {
       billData.filter((b: any) => !b.is_ai_verified).forEach((b: any) => {
-        pending.push({ id: b.id, type: 'bill', entityName: b.suppliers?.name || 'Unknown', amount: b.total_amount, date: b.issue_date, status: b.status });
+        pending.push({ id: b.id, type: 'bill', entityName: b.suppliers?.name || 'Unknown', amount: b.total_amount, date: b.issue_date, status: b.status, receiptUrl: b.receipt_url });
       });
     }
     setPendingItems(pending.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
@@ -157,7 +159,7 @@ export default function DashboardPage() {
           <div className="lg:col-span-7 xl:col-span-8 overflow-y-auto pr-1 h-full space-y-6 scrollbar-thin">
             {activeTab === 'overview' && (
               <>
-                <PendingTable items={pendingItems} onDataChanged={fetchFinancials} />
+                <PendingTable items={pendingItems} onDataChanged={fetchFinancials} onViewLog={(id) => setLogModalTxId(id)} />
                 <BentoStatsPanel
                   userEmail={userEmail}
                   invoices={invoices}
@@ -224,6 +226,9 @@ export default function DashboardPage() {
         )}
       </div>
 
+      {logModalTxId && (
+        <AiChatLogModal txId={logModalTxId} onClose={() => setLogModalTxId(null)} />
+      )}
     </div>
   );
 }

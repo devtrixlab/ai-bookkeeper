@@ -123,7 +123,12 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
           'Content-Type': 'application/json',
           ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
         },
-        body: JSON.stringify({ prompt: userText, image: currentImage, history: updatedMessages })
+        body: JSON.stringify({ 
+          prompt: userText, 
+          image: currentImage, 
+          history: updatedMessages,
+          chartOfAccounts: chartOfAccounts 
+        })
       });
 
       if (!res.ok) {
@@ -155,6 +160,23 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
 
       const ext = aiData;
       let insertedId = null;
+
+      let receiptUrl = null;
+      if (currentImage) {
+        // Convert base64 to Blob
+        const fetchRes = await fetch(currentImage);
+        const blob = await fetchRes.blob();
+        const fileName = `receipt-${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+        
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('receipts')
+          .upload(fileName, blob, { contentType: 'image/jpeg' });
+          
+        if (!uploadError && uploadData) {
+          const { data: publicUrlData } = supabase.storage.from('receipts').getPublicUrl(fileName);
+          receiptUrl = publicUrlData.publicUrl;
+        }
+      }
 
       // Ensure Account exists
       let targetAccountId = null;
@@ -192,7 +214,8 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
           status: ext.status || 'open',
           total_amount: ext.amount || 0,
           balance_due: ext.status === 'paid' ? 0 : (ext.amount || 0),
-          is_ai_verified: false
+          is_ai_verified: false,
+          receipt_url: receiptUrl
         }).select().single();
 
         if (insertError) throw insertError;
@@ -202,7 +225,7 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
         await supabase.from('bill_lines').insert({
           bill_id: insertedId,
           account_id: targetAccountId,
-          description: ext.description || ext.product_name,
+          description: ext.description || ext.product_name || 'General purchase',
           amount: ext.amount || 0
         });
 
@@ -227,14 +250,45 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
           status: ext.status || 'open',
           total_amount: ext.amount || 0,
           balance_due: ext.status === 'paid' ? 0 : (ext.amount || 0),
-          is_ai_verified: false
+          is_ai_verified: false,
+          receipt_url: receiptUrl
         }).select().single();
 
         if (insertError) throw insertError;
         insertedId = insertedInv.id;
 
+        // Find or create product
+        const productName = ext.product_name || ext.description || 'General Service';
+        let productId = null;
+        const { data: existingProd } = await supabase.from('products').select('id').eq('user_id', user.id).ilike('name', productName).limit(1).maybeSingle();
+        
+        if (existingProd) {
+          productId = existingProd.id;
+        } else {
+          const { data: newProd } = await supabase.from('products').insert({ user_id: user.id, name: productName, price: ext.amount || 0 }).select().single();
+          productId = newProd?.id;
+        }
+
         // Insert Invoice Line
-        // (Assuming product_id isn't strictly required for simplicity, but if it is we'd need to create a product)
+        if (productId) {
+          await supabase.from('invoice_lines').insert({
+            invoice_id: insertedId,
+            product_id: productId,
+            quantity: 1,
+            unit_price: ext.amount || 0,
+            total: ext.amount || 0
+          });
+        }
+      }
+
+      // Record Audit Log
+      if (insertedId) {
+        await supabase.from('ai_chat_logs').insert({
+          user_id: user.id,
+          reference_type: ext.intent === 'LOG_BILL' ? 'bill' : 'invoice',
+          reference_id: insertedId,
+          transcript: updatedMessages
+        });
       }
 
       setMessages(prev => [...prev, {
