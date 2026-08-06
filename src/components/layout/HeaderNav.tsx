@@ -19,8 +19,8 @@ import {
 } from 'lucide-react';
 
 interface HeaderNavProps {
-  activeTab: 'overview' | 'ledger' | 'analytics' | 'transactions';
-  setActiveTab: (tab: 'overview' | 'ledger' | 'analytics' | 'transactions') => void;
+  activeTab: 'overview' | 'sales' | 'purchases' | 'reports';
+  setActiveTab: (tab: 'overview' | 'sales' | 'purchases' | 'reports') => void;
   userEmail?: string;
   pendingCount?: number;
 }
@@ -84,15 +84,15 @@ export default function HeaderNav({
             </button>
 
             <button
-              onClick={() => setActiveTab('ledger')}
+              onClick={() => setActiveTab('sales')}
               className={`flex items-center gap-2 px-5 py-1.5 rounded-full text-sm font-medium transition-all cursor-pointer ${
-                activeTab === 'ledger'
+                activeTab === 'sales'
                   ? 'bg-white text-gray-900 shadow-sm border border-gray-200/80 font-semibold'
                   : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
               }`}
             >
               <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-              <span>Ledger</span>
+              <span>Sales</span>
               {pendingCount > 0 && (
                 <span className="w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center">
                   {pendingCount}
@@ -101,27 +101,27 @@ export default function HeaderNav({
             </button>
 
             <button
-              onClick={() => setActiveTab('analytics')}
+              onClick={() => setActiveTab('purchases')}
               className={`flex items-center gap-2 px-5 py-1.5 rounded-full text-sm font-medium transition-all cursor-pointer ${
-                activeTab === 'analytics'
-                  ? 'bg-white text-gray-900 shadow-sm border border-gray-200/80 font-semibold'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
-              }`}
-            >
-              <BarChart3 className="w-4 h-4 text-purple-600" />
-              <span>Analytics</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('transactions')}
-              className={`flex items-center gap-2 px-5 py-1.5 rounded-full text-sm font-medium transition-all cursor-pointer ${
-                activeTab === 'transactions'
+                activeTab === 'purchases'
                   ? 'bg-white text-gray-900 shadow-sm border border-gray-200/80 font-semibold'
                   : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
               }`}
             >
               <Receipt className="w-4 h-4 text-indigo-600" />
-              <span>Transactions</span>
+              <span>Purchases</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('reports')}
+              className={`flex items-center gap-2 px-5 py-1.5 rounded-full text-sm font-medium transition-all cursor-pointer ${
+                activeTab === 'reports'
+                  ? 'bg-white text-gray-900 shadow-sm border border-gray-200/80 font-semibold'
+                  : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4 text-purple-600" />
+              <span>Reports</span>
             </button>
           </nav>
 
@@ -198,7 +198,7 @@ export default function HeaderNav({
                       <UserIcon className="w-4 h-4 text-gray-400" /> My Account
                     </button>
                     <button
-                      onClick={() => { setActiveTab('analytics'); setShowUserDropdown(false); }}
+                      onClick={() => { setActiveTab('reports'); setShowUserDropdown(false); }}
                       className="w-full text-left px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2 cursor-pointer"
                     >
                       <Settings className="w-4 h-4 text-gray-400" /> App Settings
@@ -242,13 +242,13 @@ export default function HeaderNav({
           </button>
 
           <button
-            onClick={() => { setActiveTab('ledger'); setMobileMenuOpen(false); }}
+            onClick={() => { setActiveTab('sales'); setMobileMenuOpen(false); }}
             className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-sm font-medium ${
-              activeTab === 'ledger' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'
+              activeTab === 'sales' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'
             }`}
           >
             <div className="flex items-center gap-3">
-              <FileSpreadsheet className="w-5 h-5 text-emerald-600" /> Verified Ledger
+              <FileSpreadsheet className="w-5 h-5 text-emerald-600" /> Sales Hub
             </div>
             {pendingCount > 0 && (
               <span className="px-2 py-0.5 bg-amber-500 text-white rounded-full text-xs font-bold">
@@ -258,21 +258,21 @@ export default function HeaderNav({
           </button>
 
           <button
-            onClick={() => { setActiveTab('analytics'); setMobileMenuOpen(false); }}
+            onClick={() => { setActiveTab('purchases'); setMobileMenuOpen(false); }}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium ${
-              activeTab === 'analytics' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'
+              activeTab === 'purchases' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'
             }`}
           >
-            <BarChart3 className="w-5 h-5 text-purple-600" /> Analytics & Reports
+            <Receipt className="w-5 h-5 text-indigo-600" /> Purchases Hub
           </button>
 
           <button
-            onClick={() => { setActiveTab('transactions'); setMobileMenuOpen(false); }}
+            onClick={() => { setActiveTab('reports'); setMobileMenuOpen(false); }}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium ${
-              activeTab === 'transactions' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'
+              activeTab === 'reports' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'
             }`}
           >
-            <Receipt className="w-5 h-5 text-indigo-600" /> Data Explorer
+            <BarChart3 className="w-5 h-5 text-purple-600" /> Financial Reports
           </button>
         </div>
       )}

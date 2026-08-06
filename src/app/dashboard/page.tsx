@@ -6,16 +6,19 @@ import { Loader2, MessageSquare, X } from 'lucide-react';
 import HeaderNav from '@/components/layout/HeaderNav';
 import BentoStatsPanel from '@/components/dashboard/BentoStatsPanel';
 import AiChatPanel from '@/components/chat/AiChatPanel';
-import TransactionsExplorer from '@/components/dashboard/TransactionsExplorer';
+import SalesHub from '@/components/dashboard/SalesHub';
+import PurchasesHub from '@/components/dashboard/PurchasesHub';
+import ReportsHub from '@/components/dashboard/ReportsHub';
+import PendingTable, { PendingItem } from '@/components/dashboard/PendingTable';
 
 export default function DashboardPage() {
-  const [pendingTransactions, setPendingTransactions] = useState<any[]>([]);
-  const [verifiedTransactions, setVerifiedTransactions] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [bills, setBills] = useState<any[]>([]);
+  const [pendingItems, setPendingItems] = useState<PendingItem[]>([]);
   const [chartOfAccounts, setChartOfAccounts] = useState<any[]>([]);
-  const [contacts, setContacts] = useState<any[]>([]);
   const [userEmail, setUserEmail] = useState<string>('user@aibookkeeper.com');
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'ledger' | 'analytics' | 'transactions'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'sales' | 'purchases' | 'reports'>('overview');
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
 
   const supabase = createBrowserClient(
@@ -42,59 +45,83 @@ export default function DashboardPage() {
     }
 
     // Fetch Accounts
-    const { data: accounts, error: accError } = await supabase.from('chart_of_accounts').select('*');
+    const { data: accounts, error: accError } = await supabase.from('accounts').select('*');
     if (accError) {
       console.error("Error fetching accounts:", accError);
     } else if (accounts) {
       setChartOfAccounts(accounts);
     }
-
-    // Fetch Contacts
-    const { data: contactsData, error: conError } = await supabase.from('contacts').select('*');
-    if (conError) {
-      console.error("Error fetching contacts:", conError);
-    } else if (contactsData) {
-      setContacts(contactsData);
-    }
     
     if (currentUserId) {
-      await fetchTransactions(currentUserId);
+      await fetchFinancials(currentUserId);
     } else {
       setIsLoading(false);
     }
   }
 
-  async function fetchTransactions(uid?: string) {
+  async function fetchFinancials(uid?: string) {
     const activeUserId = uid || userId;
     if (!activeUserId) return;
 
-    const { data, error } = await supabase
-      .from('transactions')
-      .select('*, contacts(name, type), chart_of_accounts(name, account_type)')
+    // Fetch Invoices
+    const { data: invoicesData, error: invError } = await supabase
+      .from('invoices')
+      .select('*, customers(name)')
       .eq('user_id', activeUserId)
       .order('created_at', { ascending: false });
     
-    if (error) {
-      console.error("Error fetching transactions:", error);
-    } else if (data) {
-      setPendingTransactions(data.filter(t => !t.is_ai_verified));
-      setVerifiedTransactions(data.filter(t => t.is_ai_verified));
+    if (invError) console.error("Error fetching invoices:", invError);
+    else if (invoicesData) setInvoices(invoicesData);
+
+    // Fetch Bills
+    const { data: billData, error: billsError } = await supabase
+      .from('bills')
+      .select('*, suppliers(name)')
+      .eq('user_id', activeUserId)
+      .order('created_at', { ascending: false });
+
+    if (billsError) console.error("Error fetching bills:", billsError);
+
+    if (invoicesData) setInvoices(invoicesData.filter((i: any) => i.is_ai_verified));
+    if (billData) setBills(billData.filter((b: any) => b.is_ai_verified));
+
+    // Build Pending Items list
+    const pending: PendingItem[] = [];
+    if (invoicesData) {
+      invoicesData.filter((i: any) => !i.is_ai_verified).forEach((i: any) => {
+        pending.push({ id: i.id, type: 'invoice', entityName: i.customers?.name || 'Unknown', amount: i.total_amount, date: i.issue_date, status: i.status });
+      });
     }
+    if (billData) {
+      billData.filter((b: any) => !b.is_ai_verified).forEach((b: any) => {
+        pending.push({ id: b.id, type: 'bill', entityName: b.suppliers?.name || 'Unknown', amount: b.total_amount, date: b.issue_date, status: b.status });
+      });
+    }
+    setPendingItems(pending.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+
     setIsLoading(false);
   }
 
-  // Real-time Sync for Edge Case 6
+  // Real-time Sync
   useEffect(() => {
     if (!userId) return;
-    const channel = supabase
-      .channel(`public:transactions:${userId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: `user_id=eq.${userId}` }, () => {
-        fetchTransactions();
+    const channel1 = supabase
+      .channel(`public:invoices:${userId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices', filter: `user_id=eq.${userId}` }, () => {
+        fetchFinancials();
+      })
+      .subscribe();
+
+    const channel2 = supabase
+      .channel(`public:bills:${userId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bills', filter: `user_id=eq.${userId}` }, () => {
+        fetchFinancials();
       })
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(channel1);
+      supabase.removeChannel(channel2);
     };
   }, [supabase, userId]);
 
@@ -112,44 +139,55 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
       
-      {/* GLOBAL HEADER (Reference: Red Box in Untitled.png) */}
+      {/* GLOBAL HEADER */}
       <HeaderNav 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         userEmail={userEmail}
-        pendingCount={pendingTransactions.length}
+        pendingCount={pendingItems.length}
       />
 
       {/* MAIN DASHBOARD SPLIT CONTAINER */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
         
-        {/* DESKTOP SPLIT VIEW: Bento Stats on Left, AI Chat on Right */}
+        {/* DESKTOP SPLIT VIEW: Stats on Left, AI Chat on Right */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start h-[calc(100vh-6rem)] min-h-[650px]">
           
-          {/* LEFT CONTENT AREA: Bento Box Stats & Charts (Reference: Black Box & 22.png) */}
+          {/* LEFT CONTENT AREA */}
           <div className="lg:col-span-7 xl:col-span-8 overflow-y-auto pr-1 h-full space-y-6 scrollbar-thin">
-            {activeTab !== 'transactions' ? (
-              <BentoStatsPanel
-                userEmail={userEmail}
-                pendingTransactions={pendingTransactions}
-                verifiedTransactions={verifiedTransactions}
-                chartOfAccounts={chartOfAccounts}
-                contacts={contacts}
-                onDataChanged={fetchTransactions}
-                activeTab={activeTab}
-              />
-            ) : (
+            {activeTab === 'overview' && (
+              <>
+                <PendingTable items={pendingItems} onDataChanged={fetchFinancials} />
+                <BentoStatsPanel
+                  userEmail={userEmail}
+                  invoices={invoices}
+                  bills={bills}
+                  chartOfAccounts={chartOfAccounts}
+                />
+              </>
+            )}
+            {activeTab === 'sales' && (
               <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <TransactionsExplorer transactions={[...pendingTransactions, ...verifiedTransactions]} />
+                <SalesHub />
+              </div>
+            )}
+            {activeTab === 'purchases' && (
+              <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <PurchasesHub />
+              </div>
+            )}
+            {activeTab === 'reports' && (
+              <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <ReportsHub />
               </div>
             )}
           </div>
 
-          {/* RIGHT SIDEBAR: Conversational AI Assistant Chat (Reference: Green Box & 11.png) */}
+          {/* RIGHT SIDEBAR: Conversational AI Assistant Chat */}
           <div className="hidden lg:block lg:col-span-5 xl:col-span-4 h-full sticky top-20">
             <AiChatPanel
               chartOfAccounts={chartOfAccounts}
-              onDataChanged={fetchTransactions}
+              onDataChanged={fetchFinancials}
             />
           </div>
 
@@ -159,8 +197,6 @@ export default function DashboardPage() {
 
       {/* MOBILE AI CHAT FLOATING TOGGLE & SLIDE-UP DRAWER */}
       <div className="lg:hidden">
-        
-        {/* Floating Chat Button */}
         <button
           onClick={() => setMobileChatOpen(!mobileChatOpen)}
           className="fixed bottom-6 right-6 z-50 p-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-full shadow-2xl hover:scale-105 transition-all flex items-center gap-2 font-bold text-xs"
@@ -169,7 +205,6 @@ export default function DashboardPage() {
           <span>AI Assistant</span>
         </button>
 
-        {/* Slide-Up Drawer */}
         {mobileChatOpen && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex flex-col justify-end p-2 sm:p-4">
             <div className="bg-white rounded-3xl h-[85vh] w-full max-w-lg mx-auto flex flex-col shadow-2xl overflow-hidden relative">
@@ -182,12 +217,11 @@ export default function DashboardPage() {
               
               <AiChatPanel
                 chartOfAccounts={chartOfAccounts}
-                onDataChanged={fetchTransactions}
+                onDataChanged={fetchFinancials}
               />
             </div>
           </div>
         )}
-
       </div>
 
     </div>
