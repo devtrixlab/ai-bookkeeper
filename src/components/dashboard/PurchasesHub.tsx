@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
-import { Plus, Search, Receipt, Truck, Edit2, Trash2, Loader2, X, AlertCircle } from 'lucide-react';
+import { Plus, Search, Receipt, Truck, Edit2, Trash2, Loader2, X, AlertCircle, DollarSign } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { parseToCents } from '@/utils/currency';
 
@@ -16,6 +16,10 @@ export default function PurchasesHub() {
   const [isBillModalOpen, setIsBillModalOpen] = useState(false);
   const [newBill, setNewBill] = useState({ id: '', supplier_id: '', account_id: '', issue_date: '', amount: '' });
   const [isEditing, setIsEditing] = useState(false);
+  
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [paymentData, setPaymentData] = useState({ bill_id: '', amount: '', date: new Date().toISOString().split('T')[0], method: 'Bank Transfer' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -109,32 +113,27 @@ export default function PurchasesHub() {
       fetchData();
 
     } else {
-      // Insert Bill
-      const { data: insertedBill, error: billError } = await supabase.from('bills').insert({
-        user_id: user?.id,
-        supplier_id: newBill.supplier_id,
-        issue_date: newBill.issue_date,
-        total_amount: Math.round(safeAmountCents) / 100,
-        balance_due: Math.round(safeAmountCents) / 100,
-        status: 'open',
-        is_ai_verified: true // Manual entries are verified by default
-      }).select().single();
-
-      if (billError) {
-        toast.error(`Error: ${billError.message}`, { id: toastId });
-        return;
-      }
-
-      const { error: lineError } = await supabase.from('bill_lines').insert({
-        bill_id: insertedBill.id,
-        account_id: newBill.account_id,
-        amount: Math.round(safeAmountCents) / 100,
-        description: 'Manual entry'
+      // Insert Bill using atomic RPC to safely create lines BEFORE it gets verified
+      const { data: insertedId, error: createError } = await supabase.rpc('create_bill_with_lines_atomic', {
+        p_user_id: user.id,
+        p_supplier_id: newBill.supplier_id,
+        p_issue_date: newBill.issue_date,
+        p_due_date: null,
+        p_status: 'open',
+        p_total_amount: Math.round(safeAmountCents) / 100,
+        p_receipt_url: null,
+        p_line_items: [{
+           account_id: newBill.account_id,
+           description: 'Manual entry',
+           amount: Math.round(safeAmountCents) / 100
+        }]
       });
 
-      if (lineError) {
-        toast.error(`Error linking account: ${lineError.message}`, { id: toastId });
+      if (createError) {
+        toast.error(`Error: ${createError.message}`, { id: toastId });
       } else {
+        // Trigger verification AFTER lines exist
+        await supabase.from('bills').update({ is_ai_verified: true }).eq('id', insertedId);
         toast.success("Bill created and posted to ledger!", { id: toastId });
         closeModal();
         fetchData();
@@ -155,6 +154,40 @@ export default function PurchasesHub() {
       toast.error(`Error: ${error.message}`, { id: toastId });
     } else {
       toast.success("Bill deleted!", { id: toastId });
+      fetchData();
+    }
+  }
+
+  async function handleLogPayment(e: React.FormEvent) {
+    e.preventDefault();
+    if (isSubmitting) return;
+    if (!paymentData.amount || !paymentData.date) return toast.error("Please fill in all fields");
+    
+    setIsSubmitting(true);
+    const toastId = toast.loading("Logging payment...");
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+       setIsSubmitting(false);
+       return toast.error("Not authenticated", { id: toastId });
+    }
+
+    const safeAmount = Math.round(parseToCents(paymentData.amount)) / 100;
+
+    const { error } = await supabase.rpc('log_payment_made_atomic', {
+      p_bill_id: paymentData.bill_id,
+      p_user_id: user.id,
+      p_amount: safeAmount,
+      p_date: paymentData.date,
+      p_method: paymentData.method
+    });
+
+    if (error) {
+      toast.error(`Error: ${error.message}`, { id: toastId });
+      setIsSubmitting(false);
+    } else {
+      toast.success("Payment logged successfully!", { id: toastId });
+      setIsSubmitting(false);
+      setIsPaymentModalOpen(false);
       fetchData();
     }
   }
@@ -321,11 +354,15 @@ export default function PurchasesHub() {
                     <td className="px-6 py-4 text-center">
                       <span className={`px-2.5 py-1 text-[10px] font-bold rounded-full ${
                         bill.status === 'paid' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
+                        bill.status === 'partial' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
                         bill.status === 'draft' ? 'bg-gray-100 text-gray-700 border border-gray-200' :
                         'bg-amber-100 text-amber-700 border border-amber-200'
                       }`}>
                         {bill.status.toUpperCase()}
                       </span>
+                      {bill.balance_due > 0 && bill.status !== 'draft' && (
+                        <div className="text-[10px] text-gray-500 mt-1 font-medium">Due: {bill.balance_due.toLocaleString()}</div>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-center">
                       {bill.is_ai_verified ? (
@@ -335,6 +372,18 @@ export default function PurchasesHub() {
                       )}
                     </td>
                     <td className="px-6 py-4 text-right flex justify-end gap-2">
+                      {bill.balance_due > 0 && bill.status !== 'draft' && (
+                        <button 
+                          onClick={() => {
+                            setPaymentData(prev => ({ ...prev, bill_id: bill.id, amount: bill.balance_due.toString() }));
+                            setIsPaymentModalOpen(true);
+                          }}
+                          className="px-2 py-1 text-xs font-bold bg-green-50 text-green-700 hover:bg-green-100 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                          title="Log Payment"
+                        >
+                          <DollarSign className="w-3 h-3" /> Pay
+                        </button>
+                      )}
                       <button onClick={() => openEditModal(bill)} className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer">
                         <Edit2 className="w-4 h-4" />
                       </button>
@@ -432,6 +481,71 @@ export default function PurchasesHub() {
                 {isEditing ? 'Save Changes' : 'Create Bill'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* LOG PAYMENT MODAL */}
+      {isPaymentModalOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+              <h2 className="font-bold text-gray-900 flex items-center gap-2">
+                <DollarSign className="w-5 h-5 text-green-600" />
+                Log Payment Made
+              </h2>
+              <button onClick={() => setIsPaymentModalOpen(false)} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleLogPayment} className="p-6 space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Amount Paid (PKR)</label>
+                <input 
+                  type="number" 
+                  step="0.01"
+                  required
+                  value={paymentData.amount}
+                  onChange={e => setPaymentData({...paymentData, amount: e.target.value})}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all font-medium"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Date of Payment</label>
+                <input 
+                  type="date" 
+                  required
+                  value={paymentData.date}
+                  onChange={e => setPaymentData({...paymentData, date: e.target.value})}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all text-gray-600"
+                />
+              </div>
+              
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Payment Method</label>
+                <select 
+                  value={paymentData.method}
+                  onChange={e => setPaymentData({...paymentData, method: e.target.value})}
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500/20 focus:border-green-500 transition-all text-gray-600"
+                >
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Credit Card">Credit Card</option>
+                  <option value="Cheque">Cheque</option>
+                </select>
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                <button type="button" onClick={() => setIsPaymentModalOpen(false)} disabled={isSubmitting} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50">
+                  Cancel
+                </button>
+                <button type="submit" disabled={isSubmitting} className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl transition-colors shadow-sm shadow-green-600/20 cursor-pointer disabled:opacity-50">
+                  {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : 'Record Payment'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

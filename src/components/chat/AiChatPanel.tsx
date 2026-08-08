@@ -279,7 +279,7 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
           p_supplier_id: supplierId,
           p_issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
           p_due_date: ext.due_date || null,
-          p_status: ext.status || 'open',
+          p_status: 'open', // Always force open initially so payment RPC works
           p_total_amount: safeAmountCents / 100,
           p_receipt_url: receiptUrl,
           p_line_items: resolvedLines
@@ -287,6 +287,18 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
         
         if (rpcError) throw new Error(`Atomic Bill Creation Failed: ${rpcError.message}`);
         insertedId = billId;
+
+        // If the AI detected it as already paid, execute the payment RPC to debit Cash
+        if (ext.status === 'paid') {
+           const { error: payError } = await supabase.rpc('log_payment_made_atomic', {
+             p_bill_id: billId,
+             p_user_id: user.id,
+             p_amount: safeAmountCents / 100,
+             p_date: ext.issue_date || new Date().toISOString().split('T')[0],
+             p_method: 'Cash'
+           });
+           if (payError) throw new Error(`Payment Logging Failed: ${payError.message}`);
+        }
 
       } else if (ext.intent === 'LOG_INVOICE') {
         let customerId = null;
@@ -315,7 +327,7 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
           p_customer_id: customerId,
           p_issue_date: ext.issue_date || new Date().toISOString().split('T')[0],
           p_due_date: ext.due_date || null,
-          p_status: ext.status || 'open',
+          p_status: 'open', // Force open
           p_total_amount: safeAmountCents / 100,
           p_receipt_url: receiptUrl,
           p_line_items: resolvedLines
@@ -323,6 +335,18 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
         
         if (rpcError) throw new Error(`Atomic Invoice Creation Failed: ${rpcError.message}`);
         insertedId = invoiceId;
+
+        // If the AI detected it as already paid, execute the payment RPC to debit Cash
+        if (ext.status === 'paid') {
+           const { error: payError } = await supabase.rpc('log_payment_received_atomic', {
+             p_invoice_id: invoiceId,
+             p_user_id: user.id,
+             p_amount: safeAmountCents / 100,
+             p_date: ext.issue_date || new Date().toISOString().split('T')[0],
+             p_method: 'Cash'
+           });
+           if (payError) throw new Error(`Payment Logging Failed: ${payError.message}`);
+        }
       }
 
       const finalAiMessage: ChatMessage = {

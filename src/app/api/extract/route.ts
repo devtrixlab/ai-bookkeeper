@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 export async function POST(request: Request) {
   try {
     const cookieStore = await cookies();
-    const supabase = createServerClient(
+    let supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
@@ -35,8 +35,21 @@ export async function POST(request: Request) {
     if (!user) {
       const authHeader = request.headers.get("authorization");
       if (authHeader && authHeader.startsWith("Bearer ")) {
-        const token = authHeader.substring(7);
-        const { data: tokenAuthData } = await supabase.auth.getUser(token);
+        // Re-instantiate the client so RLS policies work for subsequent queries
+        supabase = createServerClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          {
+            global: {
+              headers: { Authorization: authHeader }
+            },
+            cookies: {
+              getAll() { return cookieStore.getAll(); },
+              setAll() {}
+            }
+          }
+        );
+        const { data: tokenAuthData } = await supabase.auth.getUser();
         user = tokenAuthData?.user;
       }
     }
@@ -87,11 +100,12 @@ export async function POST(request: Request) {
     - LOG_PAYMENT_RECEIVED: User received a payment from a customer.
     - UPDATE_TRANSACTION: User wants to update or modify an existing transaction.
     - QUERY_FINANCES: General cash flow or spending queries.
+    - QUERY_DEBT: Queries about who owes money or who the user owes.
     - GENERAL_HELP: General chat or usage help.
     
     RULES FOR EXTRACTION:
     1. Multi-Line Item Extraction: A single receipt/invoice can contain multiple items. You MUST return an array of line items in "line_items". For each item, extract its "description", "quantity", "unit_price", and "total". Never summarize them into a single line.
-    2. Missing Data: If critical fields (total_amount, line_items, customer/supplier name) are missing, DO NOT guess them. Set "is_complete": false and ask a conversational "clarification_question".
+    2. Missing Data: For LOG_BILL and LOG_INVOICE, if critical fields (total_amount, line_items, customer/supplier name) are missing, DO NOT guess them. For Payments, line_items are NOT required, only amount and name. If data is missing, set "is_complete": false and ask a conversational "clarification_question".
     3. Entity Resolution: Extract the exact legal name of the vendor or client into 'supplier_name' (for bills/payments made) or 'customer_name' (for invoices/payments received), separating it from the line items.
     4. Chart of Accounts Grounding: You MUST categorize each line item using ONLY the exact account names provided: [${accountNames}]. You must place the exact account name in the "account_name" field of each line item. Do not hallucinate non-existent accounting categories. If none fit perfectly, pick the closest match.
     5. Dates: Today's date is ${today}. If the user says "yesterday" or "today" or a day of the week, calculate the exact YYYY-MM-DD based on today. The "issue_date" and "due_date" MUST be in strict YYYY-MM-DD format. If no issue_date is given, default to ${today}.
@@ -101,7 +115,7 @@ export async function POST(request: Request) {
     OUTPUT FORMAT:
     You must respond ONLY with a raw JSON object matching this schema. Do not include markdown formatting, backticks, or any conversational text outside the JSON:
     {
-      "intent": "LOG_BILL" | "LOG_INVOICE" | "LOG_PAYMENT_MADE" | "LOG_PAYMENT_RECEIVED" | "UPDATE_TRANSACTION" | "QUERY_FINANCES" | "GENERAL_HELP",
+      "intent": "LOG_BILL" | "LOG_INVOICE" | "LOG_PAYMENT_MADE" | "LOG_PAYMENT_RECEIVED" | "UPDATE_TRANSACTION" | "QUERY_FINANCES" | "QUERY_DEBT" | "GENERAL_HELP",
       "customer_name": "string | null",
       "supplier_name": "string | null",
       "total_amount": number | null,
@@ -166,7 +180,7 @@ export async function POST(request: Request) {
     
     // 5. Formatting: Strip markdown code blocks before parsing
     const cleanedText = responseText.replace(/```json\n?|```/g, '').trim();
-    let structuredData;
+    let structuredData: any;
     try {
       structuredData = JSON.parse(cleanedText);
       
@@ -214,13 +228,145 @@ export async function POST(request: Request) {
         structuredData = JSON.parse(cleanedText2);
       }
 
+      if (structuredData.intent === 'QUERY_DEBT') {
+        let context = "Real Database Outstanding Debt:\n";
+        
+        const { data: unpaidInvoices } = await supabase.from('invoices')
+          .select('balance_due, customers(name)')
+          .eq('user_id', user.id)
+          .gt('balance_due', 0);
+          
+        let arTotal = 0;
+        if (unpaidInvoices && unpaidInvoices.length > 0) {
+           context += "Money owed TO you (Accounts Receivable):\n";
+           unpaidInvoices.forEach(inv => {
+             const custName = Array.isArray(inv.customers) ? inv.customers[0]?.name : (inv.customers as any)?.name;
+             context += `- ${custName || 'Unknown'}: ${inv.balance_due} PKR\n`;
+             arTotal += Number(inv.balance_due);
+           });
+           context += `Total A/R: ${arTotal} PKR\n\n`;
+        } else {
+           context += "Money owed TO you (Accounts Receivable): None\n\n";
+        }
+
+        const { data: unpaidBills } = await supabase.from('bills')
+          .select('balance_due, suppliers(name)')
+          .eq('user_id', user.id)
+          .gt('balance_due', 0);
+
+        let apTotal = 0;
+        if (unpaidBills && unpaidBills.length > 0) {
+           context += "Money YOU owe (Accounts Payable):\n";
+           unpaidBills.forEach(bill => {
+             const suppName = Array.isArray(bill.suppliers) ? bill.suppliers[0]?.name : (bill.suppliers as any)?.name;
+             context += `- ${suppName || 'Unknown'}: ${bill.balance_due} PKR\n`;
+             apTotal += Number(bill.balance_due);
+           });
+           context += `Total A/P: ${apTotal} PKR\n`;
+        } else {
+           context += "Money YOU owe (Accounts Payable): None\n";
+        }
+
+        const secondPassContents = [
+           ...finalContents,
+           { role: 'model', parts: [{ text: cleanedText }] },
+           { role: 'user', parts: [{ text: `Do not hallucinate. Using this real database data, answer the user's debt query accurately in the conversational_response field:\n${context}` }] }
+        ];
+
+        const result2 = await model.generateContent({ contents: secondPassContents });
+        const cleanedText2 = result2.response.text().replace(/```json\n?|```/g, '').trim();
+        structuredData = JSON.parse(cleanedText2);
+      }
+
+      if (structuredData.intent === 'LOG_PAYMENT_MADE' && structuredData.is_complete) {
+         if (structuredData.supplier_name && structuredData.total_amount) {
+            const { data: supplier } = await supabase.from('suppliers').select('id').ilike('name', `%${structuredData.supplier_name}%`).eq('user_id', user.id).single();
+            if (supplier) {
+               const { data: openBills } = await supabase.from('bills').select('id, balance_due').eq('user_id', user.id).eq('supplier_id', supplier.id).gt('balance_due', 0).order('issue_date', { ascending: true });
+               if (openBills && openBills.length > 0) {
+                  const exactMatch = openBills.find(b => Number(b.balance_due) === Number(structuredData.total_amount));
+                  
+                  if (exactMatch) {
+                     await supabase.rpc('log_payment_made_atomic', {
+                        p_bill_id: exactMatch.id,
+                        p_user_id: user.id,
+                        p_amount: Number(structuredData.total_amount),
+                        p_date: structuredData.issue_date || today,
+                        p_method: structuredData.payment_method || 'Cash'
+                     });
+                     structuredData.conversational_response = `I logged a payment of ${structuredData.total_amount} PKR to ${structuredData.supplier_name} for the exact matching bill.`;
+                  } else if (openBills.length === 1) {
+                     const billToPay = openBills[0];
+                     const amountToPay = Math.min(Number(billToPay.balance_due), Number(structuredData.total_amount));
+                     await supabase.rpc('log_payment_made_atomic', {
+                        p_bill_id: billToPay.id,
+                        p_user_id: user.id,
+                        p_amount: amountToPay,
+                        p_date: structuredData.issue_date || today,
+                        p_method: structuredData.payment_method || 'Cash'
+                     });
+                     structuredData.conversational_response = `I logged a payment of ${amountToPay} PKR to ${structuredData.supplier_name} for the only open bill.`;
+                  } else {
+                     structuredData.conversational_response = `I found multiple open bills for ${structuredData.supplier_name}, but none match the exact amount of ${structuredData.total_amount} PKR. Please specify which bill you are paying or log it manually from the Purchases Hub.`;
+                     structuredData.is_complete = false;
+                  }
+               } else {
+                  structuredData.conversational_response = `I couldn't find any unpaid bills for ${structuredData.supplier_name}.`;
+               }
+            } else {
+               structuredData.conversational_response = `I couldn't find a supplier named ${structuredData.supplier_name}.`;
+            }
+         }
+      }
+
+      if (structuredData.intent === 'LOG_PAYMENT_RECEIVED' && structuredData.is_complete) {
+         if (structuredData.customer_name && structuredData.total_amount) {
+            const { data: customer } = await supabase.from('customers').select('id').ilike('name', `%${structuredData.customer_name}%`).eq('user_id', user.id).single();
+            if (customer) {
+               const { data: openInvoices } = await supabase.from('invoices').select('id, balance_due').eq('user_id', user.id).eq('customer_id', customer.id).gt('balance_due', 0).order('issue_date', { ascending: true });
+               if (openInvoices && openInvoices.length > 0) {
+                  const exactMatch = openInvoices.find(b => Number(b.balance_due) === Number(structuredData.total_amount));
+
+                  if (exactMatch) {
+                     await supabase.rpc('log_payment_received_atomic', {
+                        p_invoice_id: exactMatch.id,
+                        p_user_id: user.id,
+                        p_amount: Number(structuredData.total_amount),
+                        p_date: structuredData.issue_date || today,
+                        p_method: structuredData.payment_method || 'Cash'
+                     });
+                     structuredData.conversational_response = `I logged a received payment of ${structuredData.total_amount} PKR from ${structuredData.customer_name} for the exact matching invoice.`;
+                  } else if (openInvoices.length === 1) {
+                     const invoiceToPay = openInvoices[0];
+                     const amountToPay = Math.min(Number(invoiceToPay.balance_due), Number(structuredData.total_amount));
+                     await supabase.rpc('log_payment_received_atomic', {
+                        p_invoice_id: invoiceToPay.id,
+                        p_user_id: user.id,
+                        p_amount: amountToPay,
+                        p_date: structuredData.issue_date || today,
+                        p_method: structuredData.payment_method || 'Cash'
+                     });
+                     structuredData.conversational_response = `I logged a received payment of ${amountToPay} PKR from ${structuredData.customer_name} for the open invoice.`;
+                  } else {
+                     structuredData.conversational_response = `I found multiple open invoices for ${structuredData.customer_name}, but none match the exact amount of ${structuredData.total_amount} PKR. Please specify which invoice is being paid or log it manually from the Revenue Hub.`;
+                     structuredData.is_complete = false;
+                  }
+               } else {
+                  structuredData.conversational_response = `I couldn't find any unpaid invoices for ${structuredData.customer_name}.`;
+               }
+            } else {
+               structuredData.conversational_response = `I couldn't find a customer named ${structuredData.customer_name}.`;
+            }
+         }
+      }
+
       if (structuredData.intent === 'UPDATE_TRANSACTION') {
          const up = structuredData.update_parameters;
          if (up?.transaction_id && up?.new_amount && up?.update_type) {
              const safeAmountCents = Math.round(parseFloat(up.new_amount.toString().replace(/[^0-9.-]/g, '')) * 100);
              
              if (up.update_type === 'bill') {
-                const { data: currentBill } = await supabase.from('bills').select('*, bill_lines(account_id)').eq('id', up.transaction_id).single();
+                const { data: currentBill } = await supabase.from('bills').select('*, bill_lines(account_id)').eq('id', up.transaction_id).eq('user_id', user.id).single();
                 if (currentBill) {
                    await supabase.rpc('update_bill_atomic', {
                      p_bill_id: currentBill.id,
@@ -240,7 +386,7 @@ export async function POST(request: Request) {
                    structuredData.conversational_response = `Successfully updated the bill amount to ${up.new_amount} PKR.`;
                 }
              } else {
-                const { data: currentInvoice } = await supabase.from('invoices').select('*').eq('id', up.transaction_id).single();
+                const { data: currentInvoice } = await supabase.from('invoices').select('*').eq('id', up.transaction_id).eq('user_id', user.id).single();
                 if (currentInvoice) {
                    await supabase.rpc('update_invoice_atomic', {
                      p_invoice_id: currentInvoice.id,

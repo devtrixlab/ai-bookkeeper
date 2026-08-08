@@ -5,13 +5,14 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 export const expenseSchema = {
   type: SchemaType.OBJECT,
   properties: {
-    intent: { type: SchemaType.STRING, description: "LOG_BILL | LOG_INVOICE | LOG_PAYMENT_MADE | LOG_PAYMENT_RECEIVED | UPDATE_TRANSACTION | QUERY_FINANCES | GENERAL_HELP" },
+    intent: { type: SchemaType.STRING, description: "LOG_BILL | LOG_INVOICE | LOG_PAYMENT_MADE | LOG_PAYMENT_RECEIVED | UPDATE_TRANSACTION | QUERY_FINANCES | QUERY_DEBT | GENERAL_HELP" },
     customer_name: { type: SchemaType.STRING, description: "Name of the customer (for invoices/payments received)", nullable: true },
     supplier_name: { type: SchemaType.STRING, description: "Name of the supplier (for bills/payments made)", nullable: true },
-    total_amount: { type: SchemaType.NUMBER, description: "Total amount", nullable: true },
+    total_amount: { type: SchemaType.NUMBER, description: "Total amount or payment amount", nullable: true },
     status: { type: SchemaType.STRING, description: "paid | open | partial | draft", nullable: true },
-    issue_date: { type: SchemaType.STRING, description: "Date in YYYY-MM-DD format", nullable: true },
+    issue_date: { type: SchemaType.STRING, description: "Date in YYYY-MM-DD format (used for payment date as well)", nullable: true },
     due_date: { type: SchemaType.STRING, description: "Date in YYYY-MM-DD format", nullable: true },
+    payment_method: { type: SchemaType.STRING, description: "Method of payment (e.g. Cash, Bank Transfer, Credit Card)", nullable: true },
     line_items: {
       type: SchemaType.ARRAY,
       description: "Array of line items",

@@ -40,7 +40,7 @@ async function run() {
     console.log(`User: ${turns[i].prompt}`);
     
     try {
-      const res = await fetch('http://localhost:3000/api/extract', {
+      const res = await fetch('http://localhost:3001/api/extract', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

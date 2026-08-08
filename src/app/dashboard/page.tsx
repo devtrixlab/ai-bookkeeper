@@ -5,6 +5,7 @@ import { createBrowserClient } from '@supabase/ssr';
 import { Loader2, MessageSquare, X } from 'lucide-react';
 import HeaderNav from '@/components/layout/HeaderNav';
 import BentoStatsPanel from '@/components/dashboard/BentoStatsPanel';
+import AgingSummaryPanel from '@/components/dashboard/AgingSummaryPanel';
 import AiChatPanel from '@/components/chat/AiChatPanel';
 import SalesHub from '@/components/dashboard/SalesHub';
 import PurchasesHub from '@/components/dashboard/PurchasesHub';
@@ -166,6 +167,7 @@ export default function DashboardPage() {
                   bills={bills}
                   chartOfAccounts={chartOfAccounts}
                 />
+                <AgingSummaryPanel invoices={invoices} bills={bills} />
               </>
             )}
             {activeTab === 'sales' && (
