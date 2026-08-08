@@ -210,16 +210,10 @@ export default function DashboardPage() {
         {mobileChatOpen && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex flex-col justify-end p-2 sm:p-4">
             <div className="bg-white rounded-3xl h-[85vh] w-full max-w-lg mx-auto flex flex-col shadow-2xl overflow-hidden relative">
-              <button
-                onClick={() => setMobileChatOpen(false)}
-                className="absolute top-3 right-3 z-50 p-2 bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200"
-              >
-                <X className="w-5 h-5" />
-              </button>
-              
               <AiChatPanel
                 chartOfAccounts={chartOfAccounts}
                 onDataChanged={fetchFinancials}
+                onClose={() => setMobileChatOpen(false)}
               />
             </div>
           </div>

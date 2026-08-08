@@ -34,7 +34,7 @@ export default function PurchasesHub() {
     if (activeTab === 'bills') {
       const { data: billsData } = await supabase
         .from('bills')
-        .select('*, suppliers(name)')
+        .select('*, suppliers(name), bill_lines(description)')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
       if (billsData) setBills(billsData);
@@ -73,34 +73,40 @@ export default function PurchasesHub() {
     
     const toastId = toast.loading(isEditing ? "Updating Bill..." : "Creating Bill...");
     const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.dismiss(toastId);
+      return toast.error("Not authenticated");
+    }
     
     const safeAmountCents = parseToCents(newBill.amount);
     
     if (isEditing) {
-      const { error } = await supabase.from('bills').update({
-        supplier_id: newBill.supplier_id,
-        issue_date: newBill.issue_date,
-        total_amount: safeAmountCents / 100,
-        balance_due: safeAmountCents / 100,
-      }).eq('id', newBill.id);
+      const currentBill = bills.find(b => b.id === newBill.id);
+      
+      const { error } = await supabase.rpc('update_bill_atomic', {
+        p_bill_id: newBill.id,
+        p_user_id: user.id,
+        p_supplier_id: newBill.supplier_id,
+        p_issue_date: newBill.issue_date,
+        p_due_date: null,
+        p_status: currentBill?.status || 'open',
+        p_total_amount: Math.round(safeAmountCents) / 100,
+        p_receipt_url: currentBill?.receipt_url || null,
+        p_line_items: [{
+           account_id: newBill.account_id,
+           description: 'Manual entry',
+           amount: Math.round(safeAmountCents) / 100
+        }]
+      });
       
       if (error) {
         toast.error(`Error: ${error.message}`, { id: toastId });
         return;
       }
 
-      const { error: lineError } = await supabase.from('bill_lines').update({
-        account_id: newBill.account_id,
-        amount: safeAmountCents / 100
-      }).eq('bill_id', newBill.id);
-
-      if (lineError) {
-        toast.error(`Error linking account: ${lineError.message}`, { id: toastId });
-      } else {
-        toast.success("Bill updated successfully!", { id: toastId });
-        closeModal();
-        fetchData();
-      }
+      toast.success("Bill updated successfully!", { id: toastId });
+      closeModal();
+      fetchData();
 
     } else {
       // Insert Bill
@@ -108,8 +114,8 @@ export default function PurchasesHub() {
         user_id: user?.id,
         supplier_id: newBill.supplier_id,
         issue_date: newBill.issue_date,
-        total_amount: safeAmountCents / 100,
-        balance_due: safeAmountCents / 100,
+        total_amount: Math.round(safeAmountCents) / 100,
+        balance_due: Math.round(safeAmountCents) / 100,
         status: 'open',
         is_ai_verified: true // Manual entries are verified by default
       }).select().single();
@@ -122,7 +128,7 @@ export default function PurchasesHub() {
       const { error: lineError } = await supabase.from('bill_lines').insert({
         bill_id: insertedBill.id,
         account_id: newBill.account_id,
-        amount: safeAmountCents / 100,
+        amount: Math.round(safeAmountCents) / 100,
         description: 'Manual entry'
       });
 
@@ -181,7 +187,7 @@ export default function PurchasesHub() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-2xl shadow-xs border border-gray-100">
         <div>
           <h1 className="text-xl font-extrabold text-gray-900 tracking-tight flex items-center gap-2">
-            Purchases Hub
+            Expenses & Bills Hub
           </h1>
           <p className="text-xs text-gray-500 mt-1">
             Manage your bills, expenses, and supplier catalog.
@@ -247,6 +253,7 @@ export default function PurchasesHub() {
                   <tr>
                     <th className="px-6 py-4">Bill ID</th>
                     <th className="px-6 py-4">Supplier</th>
+                    <th className="px-6 py-4">Items</th>
                     <th className="px-6 py-4">Issue Date</th>
                     <th className="px-6 py-4 text-right">Amount</th>
                     <th className="px-6 py-4 text-center">Status</th>
@@ -302,6 +309,9 @@ export default function PurchasesHub() {
                     <td className="px-6 py-4 font-semibold text-indigo-700">
                       {bill.suppliers?.name || 'Unknown'}
                     </td>
+                    <td className="px-6 py-4 text-gray-700 truncate max-w-[200px]" title={bill.bill_lines?.map((l: any) => l.description).join(', ')}>
+                      {bill.bill_lines?.map((l: any) => l.description).join(', ') || '-'}
+                    </td>
                     <td className="px-6 py-4 text-gray-500">
                       {bill.issue_date}
                     </td>
@@ -325,10 +335,10 @@ export default function PurchasesHub() {
                       )}
                     </td>
                     <td className="px-6 py-4 text-right flex justify-end gap-2">
-                      <button onClick={() => openEditModal(bill)} className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
+                      <button onClick={() => openEditModal(bill)} className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer">
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button onClick={() => handleDeleteBill(bill.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
+                      <button onClick={() => handleDeleteBill(bill.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </td>

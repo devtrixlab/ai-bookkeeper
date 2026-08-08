@@ -5,7 +5,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 export const expenseSchema = {
   type: SchemaType.OBJECT,
   properties: {
-    intent: { type: SchemaType.STRING, description: "LOG_BILL | LOG_INVOICE | LOG_PAYMENT_MADE | LOG_PAYMENT_RECEIVED | QUERY_FINANCES | GENERAL_HELP" },
+    intent: { type: SchemaType.STRING, description: "LOG_BILL | LOG_INVOICE | LOG_PAYMENT_MADE | LOG_PAYMENT_RECEIVED | UPDATE_TRANSACTION | QUERY_FINANCES | GENERAL_HELP" },
     customer_name: { type: SchemaType.STRING, description: "Name of the customer (for invoices/payments received)", nullable: true },
     supplier_name: { type: SchemaType.STRING, description: "Name of the supplier (for bills/payments made)", nullable: true },
     total_amount: { type: SchemaType.NUMBER, description: "Total amount", nullable: true },
@@ -25,6 +25,24 @@ export const expenseSchema = {
           account_name: { type: SchemaType.STRING }
         },
         required: ["description", "quantity", "unit_price", "total", "account_name"]
+      }
+    },
+    query_parameters: {
+      type: SchemaType.OBJECT,
+      nullable: true,
+      properties: {
+        target: { type: SchemaType.STRING, description: "revenue | expenses | all" },
+        date_from: { type: SchemaType.STRING, nullable: true },
+        date_to: { type: SchemaType.STRING, nullable: true }
+      }
+    },
+    update_parameters: {
+      type: SchemaType.OBJECT,
+      nullable: true,
+      properties: {
+        transaction_id: { type: SchemaType.STRING, description: "The UUID of the transaction to update", nullable: true },
+        new_amount: { type: SchemaType.NUMBER, nullable: true },
+        update_type: { type: SchemaType.STRING, description: "bill | invoice", nullable: true }
       }
     },
     is_complete: { type: SchemaType.BOOLEAN, description: "Whether all required fields to log the entry are present" },

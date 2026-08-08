@@ -81,10 +81,11 @@ export async function POST(request: Request) {
     You must classify the user's intent and extract structured financial data for double-entry bookkeeping.
     
     INTENTS:
-    - LOG_BILL: User received a bill or incurred an expense from a Supplier.
-    - LOG_INVOICE: User sent an invoice or sold a product/service to a Customer.
+    - LOG_BILL: User received a bill, or incurred a direct expense (e.g. utilities, rent) from a Vendor/Payee. Do not force product names for generic expenses; treat the vendor as the payee.
+    - LOG_INVOICE: User sent an invoice, or received alternative income from a Customer/Client.
     - LOG_PAYMENT_MADE: User paid a bill.
     - LOG_PAYMENT_RECEIVED: User received a payment from a customer.
+    - UPDATE_TRANSACTION: User wants to update or modify an existing transaction.
     - QUERY_FINANCES: General cash flow or spending queries.
     - GENERAL_HELP: General chat or usage help.
     
@@ -94,11 +95,13 @@ export async function POST(request: Request) {
     3. Entity Resolution: Extract the exact legal name of the vendor or client into 'supplier_name' (for bills/payments made) or 'customer_name' (for invoices/payments received), separating it from the line items.
     4. Chart of Accounts Grounding: You MUST categorize each line item using ONLY the exact account names provided: [${accountNames}]. You must place the exact account name in the "account_name" field of each line item. Do not hallucinate non-existent accounting categories. If none fit perfectly, pick the closest match.
     5. Dates: Today's date is ${today}. If the user says "yesterday" or "today" or a day of the week, calculate the exact YYYY-MM-DD based on today. The "issue_date" and "due_date" MUST be in strict YYYY-MM-DD format. If no issue_date is given, default to ${today}.
+    6. Conversational Queries: If intent is QUERY_FINANCES, you must provide query_parameters to specify what you need (revenue, expenses, all). If intent is UPDATE_TRANSACTION, you must extract the transaction_id from the history and provide update_parameters.
+    7. Chat History & Privacy: You MUST know that ALL chat history and financial logs ARE securely stored in the system database. Users can view their entire history at any time by clicking the "Chat History" button in the UI. If a user asks about chat history, memory, or persistence, you must explicitly confirm that their history is safely stored and accessible to them.
     
     OUTPUT FORMAT:
     You must respond ONLY with a raw JSON object matching this schema. Do not include markdown formatting, backticks, or any conversational text outside the JSON:
     {
-      "intent": "LOG_BILL" | "LOG_INVOICE" | "LOG_PAYMENT_MADE" | "LOG_PAYMENT_RECEIVED" | "QUERY_FINANCES" | "GENERAL_HELP",
+      "intent": "LOG_BILL" | "LOG_INVOICE" | "LOG_PAYMENT_MADE" | "LOG_PAYMENT_RECEIVED" | "UPDATE_TRANSACTION" | "QUERY_FINANCES" | "GENERAL_HELP",
       "customer_name": "string | null",
       "supplier_name": "string | null",
       "total_amount": number | null,
@@ -181,8 +184,91 @@ export async function POST(request: Request) {
           structuredData.clarification_question = structuredData.clarification_question || "I couldn't detect the total amount or the individual items. Could you provide those details?";
         }
       }
+
+      if (structuredData.intent === 'QUERY_FINANCES') {
+        const target = structuredData.query_parameters?.target || 'all';
+        let context = "Real Database Balances:\n";
+        let totalRevenue = 0;
+        let totalExpenses = 0;
+
+        if (target === 'revenue' || target === 'all') {
+          const { data: invoices } = await supabase.from('invoices').select('total_amount').eq('user_id', user.id).neq('status', 'draft');
+          totalRevenue = invoices?.reduce((acc, inv) => acc + Number(inv.total_amount), 0) || 0;
+          context += `- Total Revenue: ${totalRevenue} PKR\n`;
+        }
+
+        if (target === 'expenses' || target === 'all') {
+          const { data: bills } = await supabase.from('bills').select('total_amount').eq('user_id', user.id).neq('status', 'draft');
+          totalExpenses = bills?.reduce((acc, bill) => acc + Number(bill.total_amount), 0) || 0;
+          context += `- Total Expenses: ${totalExpenses} PKR\n`;
+        }
+
+        const secondPassContents = [
+           ...finalContents,
+           { role: 'model', parts: [{ text: cleanedText }] },
+           { role: 'user', parts: [{ text: `Do not hallucinate. Using this real database data, answer the user's query accurately in the conversational_response field:\n${context}` }] }
+        ];
+
+        const result2 = await model.generateContent({ contents: secondPassContents });
+        const cleanedText2 = result2.response.text().replace(/```json\n?|```/g, '').trim();
+        structuredData = JSON.parse(cleanedText2);
+      }
+
+      if (structuredData.intent === 'UPDATE_TRANSACTION') {
+         const up = structuredData.update_parameters;
+         if (up?.transaction_id && up?.new_amount && up?.update_type) {
+             const safeAmountCents = Math.round(parseFloat(up.new_amount.toString().replace(/[^0-9.-]/g, '')) * 100);
+             
+             if (up.update_type === 'bill') {
+                const { data: currentBill } = await supabase.from('bills').select('*, bill_lines(account_id)').eq('id', up.transaction_id).single();
+                if (currentBill) {
+                   await supabase.rpc('update_bill_atomic', {
+                     p_bill_id: currentBill.id,
+                     p_user_id: user.id,
+                     p_supplier_id: currentBill.supplier_id,
+                     p_issue_date: currentBill.issue_date,
+                     p_due_date: currentBill.due_date,
+                     p_status: currentBill.status,
+                     p_total_amount: Math.round(safeAmountCents) / 100,
+                     p_receipt_url: currentBill.receipt_url,
+                     p_line_items: [{
+                        account_id: currentBill.bill_lines?.[0]?.account_id || null,
+                        description: 'Updated via AI',
+                        amount: Math.round(safeAmountCents) / 100
+                     }]
+                   });
+                   structuredData.conversational_response = `Successfully updated the bill amount to ${up.new_amount} PKR.`;
+                }
+             } else {
+                const { data: currentInvoice } = await supabase.from('invoices').select('*').eq('id', up.transaction_id).single();
+                if (currentInvoice) {
+                   await supabase.rpc('update_invoice_atomic', {
+                     p_invoice_id: currentInvoice.id,
+                     p_user_id: user.id,
+                     p_customer_id: currentInvoice.customer_id,
+                     p_issue_date: currentInvoice.issue_date,
+                     p_due_date: currentInvoice.due_date,
+                     p_status: currentInvoice.status,
+                     p_total_amount: Math.round(safeAmountCents) / 100,
+                     p_receipt_url: currentInvoice.receipt_url,
+                     p_line_items: [{
+                        product_id: null,
+                        description: 'Updated via AI',
+                        quantity: 1,
+                        unit_price: Math.round(safeAmountCents) / 100,
+                        total: Math.round(safeAmountCents) / 100
+                     }]
+                   });
+                   structuredData.conversational_response = `Successfully updated the invoice amount to ${up.new_amount} PKR.`;
+                }
+             }
+         } else {
+            structuredData.conversational_response = "I need to know which transaction you want to update and the new amount. (Please click the edit icon in the UI if this is an older transaction).";
+         }
+      }
+
     } catch (e) {
-      console.error("Failed to parse JSON from AI response:", cleanedText);
+      console.error("Failed to parse JSON from AI response:", e);
       // Graceful fallback instead of crashing
       structuredData = {
         intent: 'GENERAL_HELP',

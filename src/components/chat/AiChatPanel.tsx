@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
-import { Plus, ArrowUp, Loader2, X, CheckCircle2, Receipt, Bot, User } from 'lucide-react';
+import { Plus, ArrowUp, Loader2, X, CheckCircle2, Receipt, Bot, User, History } from 'lucide-react';
 import { Account, InvoiceStatus } from '@/types';
 import { parseToCents, formatFromCents } from '@/utils/currency';
 
@@ -37,18 +37,21 @@ interface AiChatPanelProps {
 }
 
 export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }: AiChatPanelProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome-1',
-      sender: 'ai',
-      text: 'Hello! I am your AI SME Bookkeeper. Upload a bill, invoice, or type details (e.g. "I paid AWS 1500 PKR for hosting"), and I will record the double-entry automatically.',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    }
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([{
+    id: `welcome-${Date.now()}`,
+    sender: 'ai',
+    text: 'Hello! I am your AI SME Bookkeeper. Upload a bill, invoice, or type details (e.g. "I paid AWS 1500 PKR for hosting"), and I will record the double-entry automatically.',
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }]);
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
+  
+  const [isViewingHistory, setIsViewingHistory] = useState(false);
+  const [chatLogs, setChatLogs] = useState<any[]>([]);
   const [prompt, setPrompt] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -61,6 +64,39 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isExtracting]);
+
+  async function fetchChatLogs() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase.from('ai_chat_logs').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+    if (data) setChatLogs(data);
+  }
+
+  function toggleHistory() {
+    if (!isHistoryOpen) fetchChatLogs();
+    setIsHistoryOpen(!isHistoryOpen);
+  }
+
+  function loadLog(log: any) {
+    if (log.transcript) {
+      setMessages(log.transcript);
+    }
+    setIsViewingHistory(true);
+    setIsHistoryOpen(false);
+  }
+
+  function startNewChat() {
+    setIsViewingHistory(false);
+    setSessionId(crypto.randomUUID());
+    setMessages([{
+      id: `welcome-${Date.now()}`,
+      sender: 'ai',
+      text: 'Hello! I am your AI SME Bookkeeper. Upload a bill, invoice, or type details, and I will record the double-entry automatically.',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }]);
+    setPrompt('');
+    clearImage();
+  }
 
   function handleFileSelect(file: File) {
     if (!file.type.startsWith('image/')) return alert("Please upload a valid image file.");
@@ -144,15 +180,28 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
 
       const aiData = await res.json();
 
-      if (aiData.intent === 'QUERY_FINANCES' || aiData.intent === 'GENERAL_HELP') {
-        setMessages(prev => [...prev, {
+      if (['QUERY_FINANCES', 'GENERAL_HELP', 'UPDATE_TRANSACTION'].includes(aiData.intent)) {
+        const completeTranscript = [...updatedMessages, {
           id: `ai-${Date.now()}`,
-          sender: 'ai',
-          text: aiData.conversational_response || "I'm here to help you manage your finances!",
+          sender: 'ai' as const,
+          text: aiData.conversational_response || "Transaction processed.",
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }]);
+        }];
+        setMessages(completeTranscript);
+        onDataChanged();
+        
+        await supabase.from('ai_chat_logs').delete().eq('id', sessionId);
+        await supabase.from('ai_chat_logs').insert({
+          id: sessionId,
+          user_id: user.id,
+          reference_type: 'other',
+          reference_id: null,
+          transcript: completeTranscript
+        });
         return;
       }
+
+
 
       if (!aiData.is_complete) {
         setMessages(prev => [...prev, {
@@ -296,14 +345,14 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
       const completeTranscript = [...updatedMessages, finalAiMessage];
 
       // Record Audit Log
-      if (insertedId) {
-        await supabase.from('ai_chat_logs').insert({
-          user_id: user.id,
-          reference_type: ext.intent === 'LOG_BILL' ? 'bill' : 'invoice',
-          reference_id: insertedId,
-          transcript: completeTranscript
-        });
-      }
+      await supabase.from('ai_chat_logs').delete().eq('id', sessionId);
+      await supabase.from('ai_chat_logs').insert({
+        id: sessionId,
+        user_id: user.id,
+        reference_type: ext.intent === 'LOG_BILL' ? 'bill' : (ext.intent === 'LOG_INVOICE' ? 'invoice' : 'other'),
+        reference_id: insertedId || null,
+        transcript: completeTranscript
+      });
 
       setMessages(completeTranscript);
       onDataChanged();
@@ -355,10 +404,51 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
             <p className="text-[11px] text-gray-500 font-medium">Double-Entry AI Assistant</p>
           </div>
         </div>
-        {onClose && (
-          <button onClick={onClose} className="md:hidden p-2 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-full transition-colors"><X className="w-5 h-5" /></button>
-        )}
+        <div className="flex items-center gap-2">
+          <button onClick={startNewChat} className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 rounded-full transition-colors shadow-sm whitespace-nowrap">
+            New Chat
+          </button>
+          <button onClick={toggleHistory} className="p-2 bg-gray-100 text-gray-700 hover:bg-gray-200 hover:text-gray-900 rounded-full transition-colors shadow-sm shrink-0" title="Chat History">
+            <History className="w-5 h-5" />
+          </button>
+          {onClose && (
+            <button onClick={onClose} className="md:hidden p-2 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-full transition-colors shrink-0"><X className="w-5 h-5" /></button>
+          )}
+        </div>
       </div>
+
+      {isHistoryOpen && (
+        <div className="absolute inset-0 z-20 bg-white flex flex-col pt-16 animate-in slide-in-from-right-full duration-300">
+          <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+            <h3 className="font-bold text-gray-900">Chat History</h3>
+            <button onClick={() => setIsHistoryOpen(false)} className="p-1 text-gray-400 hover:bg-gray-100 rounded-full"><X className="w-5 h-5" /></button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            {chatLogs.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-8">No history found.</p>
+            ) : (
+              chatLogs.map(log => (
+                <button 
+                  key={log.id} 
+                  onClick={() => loadLog(log)}
+                  className="w-full text-left p-3 rounded-xl border border-gray-100 hover:bg-blue-50 transition-colors"
+                >
+                  <p className="font-semibold text-gray-800 text-sm">
+                    {(() => {
+                       const firstUserMsg = log.transcript?.find((m: any) => m.sender === 'user');
+                       if (firstUserMsg && firstUserMsg.text) {
+                         return firstUserMsg.text.length > 40 ? firstUserMsg.text.substring(0, 40) + '...' : firstUserMsg.text;
+                       }
+                       return log.reference_type === 'bill' ? 'Logged Bill' : (log.reference_type === 'invoice' ? 'Logged Invoice' : 'New Chat');
+                    })()}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">{new Date(log.created_at).toLocaleString()}</p>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 p-4 overflow-y-auto min-h-0 flex flex-col space-y-4">
         {messages.map((msg) => (
@@ -451,10 +541,10 @@ export default function AiChatPanel({ chartOfAccounts, onDataChanged, onClose }:
           </div>
         )}
         <form onSubmit={handleSendMessage} className="relative flex items-center bg-white rounded-full p-1.5 shadow-md pl-3 pr-2 border border-gray-200 focus-within:ring-2 focus-within:ring-blue-100">
-          <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => e.target.files && handleFileSelect(e.target.files[0])} />
-          <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-blue-600"><Plus className="w-5 h-5" /></button>
-          <input type="text" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask or log bill/invoice..." className="flex-1 bg-transparent border-none text-gray-900 text-xs sm:text-sm px-3 focus:outline-none" disabled={isExtracting} />
-          <button type="submit" disabled={isExtracting || (!prompt.trim() && !imageBase64)} className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center"><ArrowUp className="w-5 h-5" /></button>
+          <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => e.target.files && handleFileSelect(e.target.files[0])} disabled={isViewingHistory} />
+          <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-blue-600" disabled={isViewingHistory}><Plus className="w-5 h-5" /></button>
+          <input type="text" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={isViewingHistory ? "Viewing historical chat (Read-Only)" : "Ask or log bill/invoice..."} className="flex-1 bg-transparent border-none text-gray-900 text-xs sm:text-sm px-3 focus:outline-none" disabled={isExtracting || isViewingHistory} />
+          <button type="submit" disabled={isExtracting || isViewingHistory || (!prompt.trim() && !imageBase64)} className={`w-9 h-9 rounded-full flex items-center justify-center ${isViewingHistory ? 'bg-gray-300' : 'bg-blue-600'} text-white`}><ArrowUp className="w-5 h-5" /></button>
         </form>
       </div>
     </div>

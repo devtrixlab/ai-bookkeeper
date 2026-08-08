@@ -33,7 +33,7 @@ export default function SalesHub() {
     if (activeTab === 'invoices') {
       const { data: invData } = await supabase
         .from('invoices')
-        .select('*, customers(name)')
+        .select('*, customers(name), invoice_lines(description)')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
       if (invData) setInvoices(invData);
@@ -69,16 +69,33 @@ export default function SalesHub() {
     
     const toastId = toast.loading(isEditing ? "Updating Invoice..." : "Creating Invoice...");
     const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.dismiss(toastId);
+      return toast.error("Not authenticated");
+    }
     
     const safeAmountCents = parseToCents(newInvoice.amount);
     
     if (isEditing) {
-      const { error } = await supabase.from('invoices').update({
-        customer_id: newInvoice.customer_id,
-        issue_date: newInvoice.issue_date,
-        total_amount: safeAmountCents / 100,
-        balance_due: safeAmountCents / 100,
-      }).eq('id', newInvoice.id);
+      const currentInvoice = invoices.find(i => i.id === newInvoice.id);
+      
+      const { error } = await supabase.rpc('update_invoice_atomic', {
+        p_invoice_id: newInvoice.id,
+        p_user_id: user.id,
+        p_customer_id: newInvoice.customer_id,
+        p_issue_date: newInvoice.issue_date,
+        p_due_date: null,
+        p_status: currentInvoice?.status || 'open',
+        p_total_amount: Math.round(safeAmountCents) / 100,
+        p_receipt_url: currentInvoice?.receipt_url || null,
+        p_line_items: [{
+           product_id: null,
+           description: 'Manual entry',
+           quantity: 1,
+           unit_price: Math.round(safeAmountCents) / 100,
+           total: Math.round(safeAmountCents) / 100
+        }]
+      });
       
       if (error) {
         toast.error(`Error: ${error.message}`, { id: toastId });
@@ -92,8 +109,8 @@ export default function SalesHub() {
         user_id: user?.id,
         customer_id: newInvoice.customer_id,
         issue_date: newInvoice.issue_date,
-        total_amount: safeAmountCents / 100,
-        balance_due: safeAmountCents / 100,
+        total_amount: Math.round(safeAmountCents) / 100,
+        balance_due: Math.round(safeAmountCents) / 100,
         status: 'open',
         is_ai_verified: true // Manual entries are verified by default
       });
@@ -149,7 +166,7 @@ export default function SalesHub() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-2xl shadow-xs border border-gray-100">
         <div>
           <h1 className="text-xl font-extrabold text-gray-900 tracking-tight flex items-center gap-2">
-            Sales Hub
+            Revenue & Invoices Hub
           </h1>
           <p className="text-xs text-gray-500 mt-1">
             Manage your invoices, customers, and product catalogs.
@@ -215,6 +232,7 @@ export default function SalesHub() {
                   <tr>
                     <th className="px-6 py-4">Invoice ID</th>
                     <th className="px-6 py-4">Customer</th>
+                    <th className="px-6 py-4">Items</th>
                     <th className="px-6 py-4">Issue Date</th>
                     <th className="px-6 py-4 text-right">Amount</th>
                     <th className="px-6 py-4 text-center">Status</th>
@@ -270,6 +288,9 @@ export default function SalesHub() {
                     <td className="px-6 py-4 font-semibold text-blue-700">
                       {inv.customers?.name || 'Unknown'}
                     </td>
+                    <td className="px-6 py-4 text-gray-700 truncate max-w-[200px]" title={inv.invoice_lines?.map((l: any) => l.description).join(', ')}>
+                      {inv.invoice_lines?.map((l: any) => l.description).join(', ') || '-'}
+                    </td>
                     <td className="px-6 py-4 text-gray-500">
                       {inv.issue_date}
                     </td>
@@ -293,10 +314,10 @@ export default function SalesHub() {
                       )}
                     </td>
                     <td className="px-6 py-4 text-right flex justify-end gap-2">
-                      <button onClick={() => openEditModal(inv)} className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
+                      <button onClick={() => openEditModal(inv)} className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer">
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer opacity-0 group-hover:opacity-100">
+                      <button onClick={() => handleDeleteInvoice(inv.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </td>

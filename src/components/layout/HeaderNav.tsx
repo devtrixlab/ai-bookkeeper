@@ -92,7 +92,7 @@ export default function HeaderNav({
               }`}
             >
               <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-              <span>Sales</span>
+              <span>Revenue & Invoices</span>
               {pendingCount > 0 && (
                 <span className="w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center">
                   {pendingCount}
@@ -109,7 +109,7 @@ export default function HeaderNav({
               }`}
             >
               <Receipt className="w-4 h-4 text-indigo-600" />
-              <span>Purchases</span>
+              <span>Expenses & Bills</span>
             </button>
 
             <button
@@ -248,7 +248,7 @@ export default function HeaderNav({
             }`}
           >
             <div className="flex items-center gap-3">
-              <FileSpreadsheet className="w-5 h-5 text-emerald-600" /> Sales Hub
+              <FileSpreadsheet className="w-5 h-5 text-emerald-600" /> Revenue & Invoices
             </div>
             {pendingCount > 0 && (
               <span className="px-2 py-0.5 bg-amber-500 text-white rounded-full text-xs font-bold">
@@ -263,7 +263,7 @@ export default function HeaderNav({
               activeTab === 'purchases' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'
             }`}
           >
-            <Receipt className="w-5 h-5 text-indigo-600" /> Purchases Hub
+            <Receipt className="w-5 h-5 text-indigo-600" /> Expenses & Bills
           </button>
 
           <button
